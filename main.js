@@ -751,7 +751,7 @@ function renderNodes() {
       + '<td class="cell-dim">' + esc(n.port!=null?n.port:'') + '</td>'
       + '<td><span class="badge badge-info">' + esc(n.type||'') + '</span></td>'
       + '<td class="cell-actions">'
-        + '<button class="btn-icon" title="克隆" onclick="cloneNode(' + qattr(n.id) + ')">📋</button>'
+        + '<button class="btn-icon" title="克隆" onclick="duplicateNode(' + qattr(n.id) + ')">📋</button>'
         + '<button class="btn-icon" title="编辑" onclick="showNodeModal(' + qattr(n.id) + ')">✏️</button>'
         + '<button class="btn-icon danger" title="删除" onclick="confirmDeleteNode(' + qattr(n.id) + ')">🗑</button>'
       + '</td></tr>';
@@ -977,7 +977,7 @@ function confirmDeleteNode(id) {
   });
 }
 
-async function cloneNode(id) {
+async function duplicateNode(id) {
   console.log('[Clone] Attempting to clone node with id:', id);
   console.log('[Clone] Current nodesData array:', nodesData);
   const node = nodesData.find(n => n.id === id);
