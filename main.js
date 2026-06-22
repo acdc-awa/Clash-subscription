@@ -860,7 +860,7 @@ function showNodeModal(editId) {
   const node = isEdit ? nodesData.find(n => n.id === editId) : {};
   const title = isEdit ? '编辑节点' : '新增节点';
 
-  let html = '<div class="form-group"><label>节点 ID</label><input type="text" id="m-node-id" value="' + escAttr(node.id||'') + '"' + (isEdit?' readonly style="opacity:0.6"':'') + ' placeholder="如 HK1、JP1v6"></div>';
+  let html = '<div class="form-group"><label>节点 ID</label><input type="text" id="m-node-id" value="' + escAttr(node.id||'') + '" placeholder="如 HK1、JP1v6"></div>';
   html += '<div class="form-group"><label>显示名称</label><input type="text" id="m-node-name" value="' + escAttr(node.name||'') + '" placeholder="如 🇭🇰 香港01 | x0.1"></div>';
   html += '<div class="form-row">';
   html += '<div class="form-group"><label>协议类型</label><select id="m-node-type"><option value="vless"' + (node.type==='vless'?' selected':'') + '>vless</option><option value="vmess"' + (node.type==='vmess'?' selected':'') + '>vmess</option><option value="trojan"' + (node.type==='trojan'?' selected':'') + '>trojan</option><option value="ss"' + (node.type==='ss'?' selected':'') + '>ss</option><option value="hysteria2"' + (node.type==='hysteria2'?' selected':'') + '>hysteria2</option></select></div>';
@@ -933,7 +933,7 @@ async function saveNode(isEdit, editId) {
   try {
     let res;
     if (isEdit) {
-      res = await api('PUT', '/nodes/' + encodeURIComponent(editId), nodeData);
+      res = await api('PUT', '/nodes/' + encodeURIComponent(editId), { id: nodeId, ...nodeData });
     } else {
       res = await api('POST', '/nodes', { id: nodeId, ...nodeData });
     }
@@ -943,7 +943,7 @@ async function saveNode(isEdit, editId) {
       closeModal();
       if (isEdit) {
         const idx = nodesData.findIndex(n => n.id === editId);
-        if (idx !== -1) nodesData[idx] = { id: editId, ...nodeData };
+        if (idx !== -1) nodesData[idx] = { id: nodeId, ...nodeData };
       } else {
         nodesData.push({ id: nodeId, ...nodeData });
       }
@@ -1019,7 +1019,7 @@ function showUserModal(editUuid) {
   const title = isEdit ? '编辑用户' : '新增用户';
   const allowedSet = new Set(user.allowed_nodes || []);
 
-  let html = '<div class="form-group"><label>UUID</label><input type="text" id="m-user-uuid" value="' + escAttr(user.uuid||'') + '"' + (isEdit?' readonly style="opacity:0.6"':'') + ' placeholder="手动输入 UUID"></div>';
+  let html = '<div class="form-group"><label>UUID</label><input type="text" id="m-user-uuid" value="' + escAttr(user.uuid||'') + '" placeholder="手动输入 UUID"></div>';
   html += '<div class="form-group"><label>备注</label><input type="text" id="m-user-remark" value="' + escAttr(user.remark||'') + '" placeholder="如 xxx的订阅"></div>';
 
   // 订阅链接（编辑模式）
@@ -1124,7 +1124,7 @@ function showRuleModal(editName) {
   const rule = isEdit ? rulesData.find(r => r.name === editName) : {};
   const title = isEdit ? '编辑规则' : '新增规则';
 
-  let html = '<div class="form-group"><label>规则名称</label><input type="text" id="m-rule-name" value="' + escAttr(rule.name||'') + '"' + (isEdit?' readonly style="opacity:0.6"':'') + ' placeholder="如 rule1、default"></div>';
+  let html = '<div class="form-group"><label>规则名称</label><input type="text" id="m-rule-name" value="' + escAttr(rule.name||'') + '" placeholder="如 rule1、default"></div>';
   html += '<div class="form-group"><label>规则内容 (YAML)</label><textarea id="m-rule-content" rows="18" placeholder="mode: rule\\nipv6: true\\n# =PROXIES=\\nproxy-groups:\\n  ...">' + esc(rule.content||'') + '</textarea>';
   html += '<div class="form-hint">使用 <code>=PROXIES=</code> 作为节点注入占位符 · 使用 <code>"all"</code> 表示用户的全部节点</div></div>';
 
@@ -1139,7 +1139,7 @@ async function saveRule(isEdit, editName) {
   try {
     let res;
     if (isEdit) {
-      res = await api('PUT', '/rules/' + encodeURIComponent(editName), { content });
+      res = await api('PUT', '/rules/' + encodeURIComponent(editName), { name, content });
     } else {
       res = await api('POST', '/rules', { name, content });
     }

@@ -34,8 +34,8 @@ db.exec(`
     user_uuid TEXT,
     node_id TEXT,
     PRIMARY KEY (user_uuid, node_id),
-    FOREIGN KEY (user_uuid) REFERENCES users(uuid) ON DELETE CASCADE,
-    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+    FOREIGN KEY (user_uuid) REFERENCES users(uuid) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE ON UPDATE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS rules (

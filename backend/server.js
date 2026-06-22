@@ -106,17 +106,23 @@ app.post('/api/nodes', authenticate, (req, res) => {
 
 app.put('/api/nodes/:id', authenticate, (req, res) => {
   try {
-    const id = req.params.id;
-    const { id: _id, ...nodeData } = req.body;
+    const oldId = req.params.id;
+    const { id: newId, ...nodeData } = req.body;
+    if (!newId) return res.status(400).json({ error: '缺少节点 ID' });
 
-    const existing = db.prepare('SELECT 1 FROM nodes WHERE id = ?').get(id);
+    const existing = db.prepare('SELECT 1 FROM nodes WHERE id = ?').get(oldId);
     if (!existing) return res.status(404).json({ error: '节点不存在' });
 
-    db.prepare('UPDATE nodes SET name = ?, type = ?, server = ?, port = ?, config = ? WHERE id = ?')
-      .run(nodeData.name || id, nodeData.type, nodeData.server, nodeData.port ? Number(nodeData.port) : null, JSON.stringify(nodeData), id);
+    if (newId !== oldId) {
+      const conflict = db.prepare('SELECT 1 FROM nodes WHERE id = ?').get(newId);
+      if (conflict) return res.status(409).json({ error: `节点 "${newId}" 已存在` });
+    }
 
-    writeLog('UPDATE_NODE', id, `修改节点 ${id}`, req);
-    res.json({ success: true, id });
+    db.prepare('UPDATE nodes SET id = ?, name = ?, type = ?, server = ?, port = ?, config = ? WHERE id = ?')
+      .run(newId, nodeData.name || newId, nodeData.type, nodeData.server, nodeData.port ? Number(nodeData.port) : null, JSON.stringify(nodeData), oldId);
+
+    writeLog('UPDATE_NODE', newId, `修改节点 ${oldId} -> ${newId}`, req);
+    res.json({ success: true, id: newId });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -198,31 +204,37 @@ app.post('/api/users', authenticate, (req, res) => {
 
 app.put('/api/users/:uuid', authenticate, (req, res) => {
   try {
-    const uuid = req.params.uuid;
-    const { remark, allowed_nodes, rule_template } = req.body;
+    const oldUuid = req.params.uuid;
+    const { uuid: newUuid, remark, allowed_nodes, rule_template } = req.body;
+    if (!newUuid) return res.status(400).json({ error: '缺少 UUID' });
 
-    const existing = db.prepare('SELECT 1 FROM users WHERE uuid = ?').get(uuid);
+    const existing = db.prepare('SELECT 1 FROM users WHERE uuid = ?').get(oldUuid);
     if (!existing) return res.status(404).json({ error: '用户不存在' });
 
-    db.transaction(() => {
-      db.prepare('UPDATE users SET remark = ?, rule_template = ? WHERE uuid = ?')
-        .run(remark || '', rule_template || 'default', uuid);
+    if (newUuid !== oldUuid) {
+      const conflict = db.prepare('SELECT 1 FROM users WHERE uuid = ?').get(newUuid);
+      if (conflict) return res.status(409).json({ error: `用户 "${newUuid}" 已存在` });
+    }
 
-      db.prepare('DELETE FROM user_nodes WHERE user_uuid = ?').run(uuid);
+    db.transaction(() => {
+      db.prepare('UPDATE users SET uuid = ?, remark = ?, rule_template = ? WHERE uuid = ?')
+        .run(newUuid, remark || '', rule_template || 'default', oldUuid);
+
+      db.prepare('DELETE FROM user_nodes WHERE user_uuid = ?').run(newUuid);
 
       if (Array.isArray(allowed_nodes)) {
         const existingNodes = new Set(db.prepare('SELECT id FROM nodes').all().map(n => n.id));
         const insertStmt = db.prepare('INSERT INTO user_nodes (user_uuid, node_id) VALUES (?, ?)');
         for (const nodeId of allowed_nodes) {
           if (existingNodes.has(nodeId)) {
-            insertStmt.run(uuid, nodeId);
+            insertStmt.run(newUuid, nodeId);
           }
         }
       }
     })();
 
-    writeLog('UPDATE_USER', uuid, `修改用户 ${remark || uuid}`, req);
-    res.json({ success: true, uuid });
+    writeLog('UPDATE_USER', newUuid, `修改用户 ${oldUuid} -> ${newUuid}`, req);
+    res.json({ success: true, uuid: newUuid });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -286,17 +298,29 @@ app.post('/api/rules', authenticate, (req, res) => {
 
 app.put('/api/rules/:name', authenticate, (req, res) => {
   try {
-    const name = req.params.name;
-    const { content } = req.body;
+    const oldName = req.params.name;
+    const { name: newName, content } = req.body;
+    if (!newName) return res.status(400).json({ error: '缺少规则名称' });
 
-    const existing = db.prepare('SELECT 1 FROM rules WHERE name = ?').get(name);
+    const existing = db.prepare('SELECT 1 FROM rules WHERE name = ?').get(oldName);
     if (!existing) return res.status(404).json({ error: '规则不存在' });
 
-    db.prepare('UPDATE rules SET content = ? WHERE name = ?')
-      .run(content || '', name);
+    if (newName !== oldName) {
+      const conflict = db.prepare('SELECT 1 FROM rules WHERE name = ?').get(newName);
+      if (conflict) return res.status(409).json({ error: `规则 "${newName}" 已存在` });
+    }
 
-    writeLog('UPDATE_RULE', name, `修改规则 ${name}`, req);
-    res.json({ success: true, name });
+    db.transaction(() => {
+      db.prepare('UPDATE rules SET name = ?, content = ? WHERE name = ?')
+        .run(newName, content || '', oldName);
+
+      // Update references in users table
+      db.prepare('UPDATE users SET rule_template = ? WHERE rule_template = ?')
+        .run(newName, oldName);
+    })();
+
+    writeLog('UPDATE_RULE', newName, `修改规则 ${oldName} -> ${newName}`, req);
+    res.json({ success: true, name: newName });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
