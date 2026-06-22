@@ -601,9 +601,17 @@ let logsData = [];
 (function init() {
   if (token) {
     api('GET', '/nodes').then(res => {
-      if (res.ok) { showApp(); loadAllData(); }
-      else { token = ''; localStorage.removeItem('clash_admin_token'); }
-    }).catch(() => {});
+      if (res.ok) {
+        return res.json().then(data => {
+          if (Array.isArray(data)) { showApp(); loadAllData(); }
+          else { token = ''; localStorage.removeItem('clash_admin_token'); }
+        });
+      } else {
+        token = ''; localStorage.removeItem('clash_admin_token');
+      }
+    }).catch(() => {
+      token = ''; localStorage.removeItem('clash_admin_token');
+    });
   }
 })();
 
@@ -632,9 +640,20 @@ async function doLogin() {
   try {
     const res = await api('GET', '/nodes');
     if (res.ok) {
-      localStorage.setItem('clash_admin_token', token);
-      showApp();
-      loadAllData();
+      try {
+        const testData = await res.json();
+        if (Array.isArray(testData)) {
+          localStorage.setItem('clash_admin_token', token);
+          showApp();
+          loadAllData();
+        } else {
+          errEl.textContent = '后端数据格式错误';
+          token = '';
+        }
+      } catch (jsonErr) {
+        errEl.textContent = '无法解析后端响应 (可能被反代拦截并返回了默认网页)';
+        token = '';
+      }
     } else if (res.status === 401 || res.status === 403) {
       errEl.textContent = 'Token 无效，请重试';
       token = '';
@@ -959,8 +978,14 @@ function confirmDeleteNode(id) {
 }
 
 async function cloneNode(id) {
+  console.log('[Clone] Attempting to clone node with id:', id);
+  console.log('[Clone] Current nodesData array:', nodesData);
   const node = nodesData.find(n => n.id === id);
-  if (!node) return;
+  if (!node) {
+    console.error('[Clone] Error: Node not found in nodesData array for id:', id);
+    toast('克隆失败：未找到原节点配置', 'error');
+    return;
+  }
   
   let newId = id + 'clone';
   let counter = 1;
@@ -982,6 +1007,7 @@ async function cloneNode(id) {
       toast(data.error || '克隆失败', 'error');
     }
   } catch(e) {
+    console.error('[Clone] Network/Request error:', e);
     toast('网络错误', 'error');
   }
 }
