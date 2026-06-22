@@ -1,0 +1,16 @@
+{
+  "name": "clash-sub-backend",
+  "version": "1.0.0",
+  "description": "VPS Backend for Clash Subscription Manager",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
