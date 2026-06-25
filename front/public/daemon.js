@@ -262,11 +262,11 @@ function fetchXrayStats(reset = true) {
       const trafficMap = {};
       if (response && response.stat) {
         response.stat.forEach(item => {
-          // Format: user>>>email>>>direction
+          // Format: user>>>email>>>traffic>>>direction
           const parts = item.name.split('>>>');
-          if (parts.length >= 3) {
+          if (parts.length >= 4) {
             const email = parts[1];
-            const direction = parts[2]; // uplink or downlink
+            const direction = parts[3]; // uplink or downlink
             if (!trafficMap[email]) {
               trafficMap[email] = { email, uplink: 0, downlink: 0 };
             }
