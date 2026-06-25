@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   clash-sub-backend:
-    build: .
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
     container_name: clash-sub-backend
     restart: always
     ports:
