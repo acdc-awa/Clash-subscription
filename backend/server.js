@@ -1488,7 +1488,8 @@ wss.on('connection', (ws, request) => {
           const clientList = inboundUsers.map(u => ({
             id: u.uuid,
             flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : '',
-            email: u.email
+            email: u.email,
+            level: 0
           }));
 
           const xrayInb = {

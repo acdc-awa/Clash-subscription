@@ -369,6 +369,7 @@ function connectWS() {
                       {
                         id: uuid,
                         email: email,
+                        level: 0,
                         flow: inb.flow || ""
                       }
                     ]
