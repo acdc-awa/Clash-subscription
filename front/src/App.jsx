@@ -1850,7 +1850,7 @@ function AdminDashboard() {
                 <label>所属节点 (必填)</label>
                 <select 
                   value={currentInbound.node_id} 
-                  onChange={(e) => setCurrentInbound({ ...currentInbound, node_id: Number(e.target.value) })}
+                  onChange={(e) => setCurrentInbound({ ...currentInbound, node_id: e.target.value })}
                   required
                 >
                   <option value="" disabled>请选择一个节点</option>
