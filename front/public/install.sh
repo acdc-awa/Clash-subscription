@@ -158,8 +158,16 @@ EOF
 
 # Enable UFW if not enabled, and allow SSH to prevent lock out
 if command -v ufw &> /dev/null; then
-  echo "[+] Configuring UFW defaults (allowing SSH)..."
-  ufw allow 22/tcp comment 'SSH' || true
+  echo "[+] Configuring UFW defaults..."
+  # Try to detect active SSH port dynamically, fallback to 22
+  ssh_port="22"
+  if command -v ss &> /dev/null; then
+    ssh_port=$(ss -tlnp 2>/dev/null | grep -i sshd | grep -oE ':[0-9]+' | grep -oE '[0-9]+' | head -n1 || echo "22")
+  elif command -v netstat &> /dev/null; then
+    ssh_port=$(netstat -tlnp 2>/dev/null | grep -i sshd | grep -oE ':[0-9]+' | grep -oE '[0-9]+' | head -n1 || echo "22")
+  fi
+  echo "[+] Allowing detected SSH port: $ssh_port/tcp"
+  ufw allow "$ssh_port"/tcp comment 'SSH' || true
   ufw --force enable || true
 fi
 
