@@ -932,6 +932,27 @@ app.get('/api/audit/dashboard', authenticate, requireAdmin, (req, res) => {
   }
 });
 
+app.get('/api/utils/generate-keys', authenticate, requireAdmin, (req, res) => {
+  try {
+    const { generateKeyPairSync, randomBytes } = require('crypto');
+    const { publicKey, privateKey } = generateKeyPairSync('x25519');
+    
+    // Export raw key bytes as base64url representation (JWK format)
+    const pubBase64 = publicKey.export({ format: 'jwk' }).x;
+    const privBase64 = privateKey.export({ format: 'jwk' }).d;
+    
+    const shortId = randomBytes(8).toString('hex');
+    
+    res.json({
+      publicKey: pubBase64,
+      privateKey: privBase64,
+      shortId
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ------------------------------------------------------------
 // Clash Subscription Endpoint
 // ------------------------------------------------------------
@@ -1391,26 +1412,6 @@ wss.on('connection', (ws, request) => {
   });
 });
 
-app.get('/api/utils/generate-keys', authenticate, requireAdmin, (req, res) => {
-  try {
-    const { generateKeyPairSync, randomBytes } = require('crypto');
-    const { publicKey, privateKey } = generateKeyPairSync('x25519');
-    
-    // Export raw key bytes as base64url representation (JWK format)
-    const pubBase64 = publicKey.export({ format: 'jwk' }).x;
-    const privBase64 = privateKey.export({ format: 'jwk' }).d;
-    
-    const shortId = randomBytes(8).toString('hex');
-    
-    res.json({
-      publicKey: pubBase64,
-      privateKey: privBase64,
-      shortId
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 server.listen(PORT, () => {
   console.log(`VPS Clash Subscription Controller backend listening on port ${PORT}`);
