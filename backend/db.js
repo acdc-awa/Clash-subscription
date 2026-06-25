@@ -70,6 +70,15 @@ db.exec(`
     FOREIGN KEY (inbound_id) REFERENCES inbounds(id) ON DELETE CASCADE ON UPDATE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS package_aliases (
+    package_id TEXT,
+    inbound_id TEXT,
+    alias_index INTEGER,
+    PRIMARY KEY (package_id, inbound_id, alias_index),
+    FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (inbound_id) REFERENCES inbounds(id) ON DELETE CASCADE ON UPDATE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS rules (
     name TEXT PRIMARY KEY,
     content TEXT NOT NULL

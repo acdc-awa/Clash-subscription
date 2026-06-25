@@ -1825,29 +1825,63 @@ function AdminDashboard() {
                           {node.name} ({node.id})
                         </div>
                         <div style={{ paddingLeft: '10px' }}>
-                          {nodeInbounds.map(inb => (
-                            <label key={inb.id} className="checkbox-label" style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-                              <input 
-                                type="checkbox" 
-                                value={inb.id}
-                                checked={(currentPackage.allowed_inbounds || []).includes(inb.id)}
-                                onChange={(e) => {
-                                  const checked = e.target.checked;
-                                  const inbVal = e.target.value;
-                                  setCurrentPackage(prev => {
-                                    const currentList = prev.allowed_inbounds || [];
-                                    const newList = checked 
-                                      ? [...currentList, inbVal]
-                                      : currentList.filter(x => x !== inbVal);
-                                    return { ...prev, allowed_inbounds: newList };
-                                  });
-                                }}
-                              />
-                              <span style={{ marginLeft: '6px' }}>
-                                端口 {inb.port} ({inb.protocol.toUpperCase()}/{inb.network.toUpperCase()})
-                              </span>
-                            </label>
-                          ))}
+                          {nodeInbounds.map(inb => {
+                            let aliases = [];
+                            if (inb.config && inb.config.aliases && Array.isArray(inb.config.aliases)) {
+                              aliases = inb.config.aliases;
+                            }
+                            return (
+                              <div key={inb.id} style={{ marginBottom: '8px' }}>
+                                <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                                  <input 
+                                    type="checkbox" 
+                                    value={inb.id}
+                                    checked={(currentPackage.allowed_inbounds || []).includes(inb.id)}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      const inbVal = e.target.value;
+                                      setCurrentPackage(prev => {
+                                        const currentList = prev.allowed_inbounds || [];
+                                        const newList = checked 
+                                          ? [...currentList, inbVal]
+                                          : currentList.filter(x => x !== inbVal);
+                                        return { ...prev, allowed_inbounds: newList };
+                                      });
+                                    }}
+                                  />
+                                  <span style={{ marginLeft: '6px', fontWeight: aliases.length ? 'bold' : 'normal' }}>
+                                    主入口: 端口 {inb.port} ({inb.protocol.toUpperCase()}/{inb.network.toUpperCase()})
+                                  </span>
+                                </label>
+                                {aliases.map((alias, idx) => {
+                                  const aliasId = `${inb.id}_alias_${idx}`;
+                                  return (
+                                    <label key={aliasId} className="checkbox-label" style={{ display: 'flex', alignItems: 'center', marginBottom: '4px', paddingLeft: '24px' }}>
+                                      <input 
+                                        type="checkbox" 
+                                        value={aliasId}
+                                        checked={(currentPackage.allowed_inbounds || []).includes(aliasId)}
+                                        onChange={(e) => {
+                                          const checked = e.target.checked;
+                                          const inbVal = e.target.value;
+                                          setCurrentPackage(prev => {
+                                            const currentList = prev.allowed_inbounds || [];
+                                            const newList = checked 
+                                              ? [...currentList, inbVal]
+                                              : currentList.filter(x => x !== inbVal);
+                                            return { ...prev, allowed_inbounds: newList };
+                                          });
+                                        }}
+                                      />
+                                      <span style={{ marginLeft: '6px', color: 'var(--text-secondary)' }}>
+                                        别名入口: {alias.name} ({alias.server}:{alias.port})
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );

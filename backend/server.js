@@ -75,6 +75,11 @@ function pushUserEventToAllowedNodes(userUuid, email, eventType) {
       JOIN inbounds i ON pi.inbound_id = i.id
       JOIN users u ON u.package_id = pi.package_id
       WHERE u.uuid = ?
+      UNION
+      SELECT DISTINCT i.node_id FROM package_aliases pa
+      JOIN inbounds i ON pa.inbound_id = i.id
+      JOIN users u ON u.package_id = pa.package_id
+      WHERE u.uuid = ?
     `).all(userUuid);
     const nodeIds = allowedNodeRows.map(r => r.node_id);
     
@@ -83,9 +88,14 @@ function pushUserEventToAllowedNodes(userUuid, email, eventType) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         // Fetch inbound details for the user on this node
         const inbounds = db.prepare(`
-          SELECT i.port, i.network, i.security FROM inbounds i
+          SELECT DISTINCT i.port, i.network, i.security FROM inbounds i
           JOIN package_inbounds pi ON i.id = pi.inbound_id
           JOIN users u ON u.package_id = pi.package_id
+          WHERE i.node_id = ? AND u.uuid = ?
+          UNION
+          SELECT DISTINCT i.port, i.network, i.security FROM inbounds i
+          JOIN package_aliases pa ON i.id = pa.inbound_id
+          JOIN users u ON u.package_id = pa.package_id
           WHERE i.node_id = ? AND u.uuid = ?
         `).all(nodeId, userUuid);
         const inboundDetails = inbounds.map(inb => ({
@@ -112,9 +122,14 @@ function pushUserAddtoNode(nodeId, email, userUuid) {
   const ws = activeNodes.get(nodeId);
   if (ws && ws.readyState === WebSocket.OPEN) {
     const inbounds = db.prepare(`
-      SELECT i.port, i.network, i.security FROM inbounds i
+      SELECT DISTINCT i.port, i.network, i.security FROM inbounds i
       JOIN package_inbounds pi ON i.id = pi.inbound_id
       JOIN users u ON u.package_id = pi.package_id
+      WHERE i.node_id = ? AND u.uuid = ?
+      UNION
+      SELECT DISTINCT i.port, i.network, i.security FROM inbounds i
+      JOIN package_aliases pa ON i.id = pa.inbound_id
+      JOIN users u ON u.package_id = pa.package_id
       WHERE i.node_id = ? AND u.uuid = ?
     `).all(nodeId, userUuid);
     const inboundDetails = inbounds.map(inb => ({
@@ -886,9 +901,13 @@ app.get('/api/packages', authenticate, (req, res) => {
     const rows = db.prepare('SELECT * FROM packages').all();
     const packages = rows.map(p => {
       const allowedInboundRows = db.prepare('SELECT inbound_id FROM package_inbounds WHERE package_id = ?').all(p.id);
+      const allowedAliasRows = db.prepare('SELECT inbound_id, alias_index FROM package_aliases WHERE package_id = ?').all(p.id);
       return {
         ...p,
-        allowed_inbounds: allowedInboundRows.map(r => r.inbound_id)
+        allowed_inbounds: [
+          ...allowedInboundRows.map(r => r.inbound_id),
+          ...allowedAliasRows.map(r => `${r.inbound_id}_alias_${r.alias_index}`)
+        ]
       };
     });
     res.json(packages);
@@ -912,9 +931,15 @@ app.post('/api/packages', authenticate, requireAdmin, (req, res) => {
         .run(id, name, Number(traffic), Number(duration_days), Number(price), rt, ep);
 
       if (Array.isArray(allowed_inbounds)) {
-        const stmt = db.prepare('INSERT INTO package_inbounds (package_id, inbound_id) VALUES (?, ?)');
+        const stmtInbounds = db.prepare('INSERT INTO package_inbounds (package_id, inbound_id) VALUES (?, ?)');
+        const stmtAliases = db.prepare('INSERT INTO package_aliases (package_id, inbound_id, alias_index) VALUES (?, ?, ?)');
         for (const inbId of allowed_inbounds) {
-          stmt.run(id, inbId);
+          if (inbId.includes('_alias_')) {
+            const parts = inbId.split('_alias_');
+            stmtAliases.run(id, parts[0], Number(parts[1]));
+          } else {
+            stmtInbounds.run(id, inbId);
+          }
         }
       }
     })();
@@ -949,9 +974,16 @@ app.put('/api/packages/:id', authenticate, requireAdmin, (req, res) => {
 
       if (Array.isArray(allowed_inbounds)) {
         db.prepare('DELETE FROM package_inbounds WHERE package_id = ?').run(id);
-        const stmt = db.prepare('INSERT INTO package_inbounds (package_id, inbound_id) VALUES (?, ?)');
+        db.prepare('DELETE FROM package_aliases WHERE package_id = ?').run(id);
+        const stmtInbounds = db.prepare('INSERT INTO package_inbounds (package_id, inbound_id) VALUES (?, ?)');
+        const stmtAliases = db.prepare('INSERT INTO package_aliases (package_id, inbound_id, alias_index) VALUES (?, ?, ?)');
         for (const inbId of allowed_inbounds) {
-          stmt.run(id, inbId);
+          if (inbId.includes('_alias_')) {
+            const parts = inbId.split('_alias_');
+            stmtAliases.run(id, parts[0], Number(parts[1]));
+          } else {
+            stmtInbounds.run(id, inbId);
+          }
         }
       }
     })();
@@ -1190,6 +1222,7 @@ app.get('/subscribe/:token', async (req, res) => {
     // Retrieve package details to get rule template and allowed inbounds
     let ruleTemplateName = "default";
     let allowedInboundRows = [];
+    let allowedAliasRows = [];
     
     if (user.package_id) {
       const pkg = db.prepare('SELECT * FROM packages WHERE id = ?').get(user.package_id);
@@ -1200,6 +1233,13 @@ app.get('/subscribe/:token', async (req, res) => {
           JOIN nodes n ON i.node_id = n.id
           JOIN package_inbounds pi ON i.id = pi.inbound_id
           WHERE pi.package_id = ?
+        `).all(user.package_id);
+
+        allowedAliasRows = db.prepare(`
+          SELECT i.*, n.name as node_name, n.server as node_server, pa.alias_index FROM inbounds i
+          JOIN nodes n ON i.node_id = n.id
+          JOIN package_aliases pa ON i.id = pa.inbound_id
+          WHERE pa.package_id = ?
         `).all(user.package_id);
       }
     }
@@ -1214,17 +1254,28 @@ app.get('/subscribe/:token', async (req, res) => {
     const nodes = [];
     const unallowedNodeIds = [];
 
-    // Retrieve all inbounds to see which are unallowed
-    const allInbounds = db.prepare('SELECT id FROM inbounds').all();
-    const allowedInboundIds = allowedInboundRows.map(i => i.id);
+    // Map unique inbound records
+    const uniqueInbounds = new Map();
+    const selectedMain = new Set();
+    const selectedAliases = new Set();
 
-    for (const inb of allowedInboundRows) {
+    allowedInboundRows.forEach(r => {
+      uniqueInbounds.set(r.id, r);
+      selectedMain.add(r.id);
+    });
+
+    allowedAliasRows.forEach(r => {
+      uniqueInbounds.set(r.id, r);
+      selectedAliases.add(`${r.id}_alias_${r.alias_index}`);
+    });
+
+    for (const inb of uniqueInbounds.values()) {
       let inbConfig = {};
       try { inbConfig = JSON.parse(inb.config); } catch {}
       
       // Assemble Clash node profile using the secret user UUID
-      const displayName = inbConfig.displayName || `${inb.node_name} - ${inb.network.toUpperCase()} (${inb.port})`;
-      const nodeProfile = {
+      const displayName = inbConfig.displayName || `${inb.node_name}-${inb.port}`;
+      let nodeProfile = {
         id: inb.id,
         name: displayName,
         type: inb.protocol,
@@ -1256,30 +1307,33 @@ app.get('/subscribe/:token', async (req, res) => {
         };
       }
 
-      nodes.push(nodeProfile);
+      if (selectedMain.has(inb.id)) {
+        nodes.push(nodeProfile);
+      }
 
-      // Inject aliases if configured
+      // Inject aliases if configured and selected
       if (inbConfig.aliases && Array.isArray(inbConfig.aliases)) {
         for (let i = 0; i < inbConfig.aliases.length; i++) {
-          const alias = inbConfig.aliases[i];
-          if (alias.name && alias.server && alias.port) {
-            // Clone the profile
-            const aliasProfile = JSON.parse(JSON.stringify(nodeProfile));
-            // Override fields
-            aliasProfile.name = alias.name;
-            aliasProfile.server = alias.server;
-            aliasProfile.port = Number(alias.port);
-            // In order to distinguish in the regex replacement if needed, 
-            // though the regex depends on the inbound ID which is the same.
-            nodes.push(aliasProfile);
+          const aliasId = `${inb.id}_alias_${i}`;
+          if (selectedAliases.has(aliasId)) {
+            const alias = inbConfig.aliases[i];
+            if (alias.name && alias.server && alias.port) {
+              // Clone the profile
+              const aliasProfile = JSON.parse(JSON.stringify(nodeProfile));
+              // Override fields
+              aliasProfile.name = alias.name;
+              aliasProfile.server = alias.server;
+              aliasProfile.port = Number(alias.port);
+              nodes.push(aliasProfile);
+            }
           }
         }
       }
     }
 
-    // Unallowed inbounds should include all inbounds not explicitly in package_inbounds
+    const allInbounds = db.prepare('SELECT id FROM inbounds').all();
     for (const inb of allInbounds) {
-      if (!allowedInboundIds.includes(inb.id)) {
+      if (!selectedMain.has(inb.id) && ![...selectedAliases].some(a => a.startsWith(inb.id + '_alias_'))) {
         unallowedNodeIds.push(inb.id);
       }
     }
