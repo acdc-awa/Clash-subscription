@@ -9,11 +9,33 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const fs = require('fs');
 const db = require('./db');
+const si = require('systeminformation');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 let JWT_SECRET = process.env.JWT_SECRET;
 let JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30m';
+const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '2d';
+
+// Network stats polling for Central Server
+let centralNetStats = { rx_sec: 0, tx_sec: 0 };
+setInterval(async () => {
+  try {
+    const netStats = await si.networkStats();
+    if (netStats && netStats.length > 0) {
+      let rx = 0, tx = 0;
+      for (const iface of netStats) {
+        if (iface.operstate === 'up') {
+          rx += iface.rx_sec || 0;
+          tx += iface.tx_sec || 0;
+        }
+      }
+      centralNetStats.rx_sec = rx;
+      centralNetStats.tx_sec = tx;
+    }
+  } catch (err) {}
+}, 2000);
 
 if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
   if (!JWT_SECRET) JWT_SECRET = crypto.randomBytes(32).toString('hex');
@@ -27,10 +49,12 @@ if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
     let toAppend = '';
     if (!envContent.includes('JWT_SECRET=')) toAppend += `\nJWT_SECRET=${JWT_SECRET}\n`;
     if (!envContent.includes('JWT_REFRESH_SECRET=')) toAppend += `\nJWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}\n`;
+    if (!envContent.includes('JWT_EXPIRES_IN=')) toAppend += `JWT_EXPIRES_IN=30m\n`;
+    if (!envContent.includes('JWT_REFRESH_EXPIRES_IN=')) toAppend += `JWT_REFRESH_EXPIRES_IN=2d\n`;
     
     if (toAppend) {
       fs.appendFileSync(envPath, toAppend);
-      console.warn('[Security] JWT_SECRET/JWT_REFRESH_SECRET 未配置，已自动生成并持久化到 .env 文件。');
+      console.warn('[Security] JWT 密钥或过期时间未完整配置，已自动补全并持久化到 .env 文件。');
     }
   } catch (e) {
     console.warn('[Security] JWT 密钥自动生成（仅本次运行有效，无法写入 .env）。');
@@ -204,13 +228,13 @@ app.post('/api/auth/login', (req, res) => {
     const token = jwt.sign(
       { uuid: user.uuid, email: user.email, role: user.role },
       JWT_SECRET,
-      { expiresIn: '15m' }
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     const refreshToken = jwt.sign(
       { uuid: user.uuid },
       JWT_REFRESH_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: JWT_REFRESH_EXPIRES_IN }
     );
 
     // Save refresh token to db
@@ -283,7 +307,7 @@ app.post('/api/auth/refresh', (req, res) => {
     const token = jwt.sign(
       { uuid: user.uuid, email: user.email, role: user.role },
       JWT_SECRET,
-      { expiresIn: '15m' }
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     res.json({ success: true, token });
@@ -460,14 +484,44 @@ app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
   }
 });
 
-app.post('/api/nodes/:id/force-report', authenticate, requireAdmin, (req, res) => {
+app.post('/api/nodes/force-report', authenticate, requireAdmin, (req, res) => {
   try {
-    const id = req.params.id;
-    const ws = activeNodes.get(id);
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return res.status(404).json({ error: '节点离线或未连接' });
+    let count = 0;
+    for (const [id, ws] of activeNodes.entries()) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ event: 'FORCE_REPORT' }));
+        count++;
+      }
     }
-    ws.send(JSON.stringify({ event: 'FORCE_REPORT' }));
+    res.json({ success: true, count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/nodes/report-interval', authenticate, requireAdmin, (req, res) => {
+  try {
+    const { interval } = req.body;
+    if (!interval || isNaN(Number(interval))) {
+      return res.status(400).json({ error: '无效的刷新时间' });
+    }
+    const nodes = db.prepare('SELECT id, advanced_config FROM nodes').all();
+    db.transaction(() => {
+      const updateStmt = db.prepare('UPDATE nodes SET advanced_config = ? WHERE id = ?');
+      for (const node of nodes) {
+        let advConfig = {};
+        if (node.advanced_config) {
+          try { advConfig = JSON.parse(node.advanced_config); } catch {}
+        }
+        advConfig.report_interval = Number(interval);
+        updateStmt.run(JSON.stringify(advConfig), node.id);
+      }
+    })();
+    // push to all connected nodes
+    for (const node of nodes) {
+      triggerNodeConfigReload(node.id);
+    }
+    writeLog('UPDATE_NODE', 'ALL', `将所有节点的汇报间隔设为 ${interval} 秒`, req);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1084,7 +1138,8 @@ app.get('/api/audit/dashboard', authenticate, requireAdmin, (req, res) => {
       total_used_traffic: trafficStats.total_used || 0,
       total_limit_traffic: trafficStats.total_limit || 0,
       online_nodes: onlineNodesCount,
-      total_nodes: totalNodesCount
+      total_nodes: totalNodesCount,
+      server_network: centralNetStats
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1168,9 +1223,10 @@ app.get('/subscribe/:token', async (req, res) => {
       try { inbConfig = JSON.parse(inb.config); } catch {}
       
       // Assemble Clash node profile using the secret user UUID
+      const displayName = inbConfig.displayName || `${inb.node_name} - ${inb.network.toUpperCase()} (${inb.port})`;
       const nodeProfile = {
         id: inb.id,
-        name: `${inb.node_name} - ${inb.network.toUpperCase()} (${inb.port})`,
+        name: displayName,
         type: inb.protocol,
         server: inb.node_server,
         port: inb.port,
@@ -1201,6 +1257,24 @@ app.get('/subscribe/:token', async (req, res) => {
       }
 
       nodes.push(nodeProfile);
+
+      // Inject aliases if configured
+      if (inbConfig.aliases && Array.isArray(inbConfig.aliases)) {
+        for (let i = 0; i < inbConfig.aliases.length; i++) {
+          const alias = inbConfig.aliases[i];
+          if (alias.name && alias.server && alias.port) {
+            // Clone the profile
+            const aliasProfile = JSON.parse(JSON.stringify(nodeProfile));
+            // Override fields
+            aliasProfile.name = alias.name;
+            aliasProfile.server = alias.server;
+            aliasProfile.port = Number(alias.port);
+            // In order to distinguish in the regex replacement if needed, 
+            // though the regex depends on the inbound ID which is the same.
+            nodes.push(aliasProfile);
+          }
+        }
+      }
     }
 
     // Unallowed inbounds should include all inbounds not explicitly in package_inbounds
@@ -1212,8 +1286,16 @@ app.get('/subscribe/:token', async (req, res) => {
 
     const finalYaml = injectProxies(ruleTemplate, nodes, unallowedNodeIds);
 
+    // Calculate expiry timestamp in seconds
+    const expiryTimeUnix = user.expiry_time 
+      ? Math.floor(new Date(user.expiry_time).getTime() / 1000) 
+      : Math.floor(new Date().getTime() / 1000) + 315360000; // default 10 years
+
     res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="subscription.yaml"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(user.email)}.yaml"`);
+    res.setHeader('profile-update-interval', '24');
+    res.setHeader('profile-title', user.email);
+    res.setHeader('Subscription-Userinfo', `upload=${Math.floor((user.used_traffic || 0) / 2)}; download=${Math.ceil((user.used_traffic || 0) / 2)}; total=${user.total_traffic || 0}; expire=${expiryTimeUnix}`);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     return res.send(finalYaml);
 

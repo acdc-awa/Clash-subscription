@@ -90,27 +90,34 @@ async function apiFetch(method, urlPath, body = null) {
 
   let response = await fetch(urlPath, options);
 
-  if (response.status === 401 && localStorage.getItem('clash_refresh_token') && urlPath !== '/api/auth/refresh') {
-    try {
-      const refreshResp = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: localStorage.getItem('clash_refresh_token') })
-      });
-      
-      if (refreshResp.ok) {
-        const refreshData = await refreshResp.json();
-        localStorage.setItem('clash_token', refreshData.token);
-        headers['Authorization'] = `Bearer ${refreshData.token}`;
-        options.headers = headers;
-        response = await fetch(urlPath, options); // Retry original request
-      } else {
-        throw new Error('Refresh failed');
+  if (response.status === 401) {
+    if (localStorage.getItem('clash_refresh_token') && urlPath !== '/api/auth/refresh') {
+      try {
+        const refreshResp = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: localStorage.getItem('clash_refresh_token') })
+        });
+        
+        if (refreshResp.ok) {
+          const refreshData = await refreshResp.json();
+          localStorage.setItem('clash_token', refreshData.token);
+          headers['Authorization'] = `Bearer ${refreshData.token}`;
+          options.headers = headers;
+          response = await fetch(urlPath, options); // Retry original request
+        } else {
+          throw new Error('Refresh failed');
+        }
+      } catch (err) {
+        localStorage.clear();
+        window.location.href = '/login';
+        throw new Error('会话已过期，请重新登录');
       }
-    } catch (err) {
+    } else {
+      // No refresh token or refresh endpoint returned 401
       localStorage.clear();
       window.location.href = '/login';
-      throw new Error('会话已过期，请重新登录');
+      throw new Error('会话已失效，请重新登录');
     }
   }
 
@@ -567,6 +574,8 @@ function AdminDashboard() {
   const [nodeModalOpen, setNodeModalOpen] = useState(false);
   const [currentPackage, setCurrentPackage] = useState(null);
   const [pkgModalOpen, setPkgModalOpen] = useState(false);
+  const [reportIntervalModalOpen, setReportIntervalModalOpen] = useState(false);
+  const [intervalSecs, setIntervalSecs] = useState("30");
 
   const fetchAdminData = async () => {
     try {
@@ -778,10 +787,22 @@ function AdminDashboard() {
     }
   };
 
-  const handleForceReport = async (id) => {
+  const handleForceReportAll = async () => {
     try {
-      await apiFetch('POST', `/api/nodes/${id}/force-report`);
-      showToast('强制汇报指令已下发，稍后请刷新页面查看', 'success');
+      const res = await apiFetch('POST', '/api/nodes/force-report');
+      showToast(`成功向 ${res.count || 0} 个在线节点下发强制汇报指令`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const handleUpdateReportInterval = async (e) => {
+    e.preventDefault();
+    try {
+      await apiFetch('POST', '/api/nodes/report-interval', { interval: intervalSecs });
+      showToast('全局刷新时间已更新，所有在线节点将自动重新加载配置', 'success');
+      setReportIntervalModalOpen(false);
+      fetchAdminData();
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -816,7 +837,9 @@ function AdminDashboard() {
         serviceName: inbound.config?.serviceName || 'grpc-service',
         path: inbound.config?.path || '/xh',
         host: inbound.config?.host || '',
-        mode: inbound.config?.mode || 'stream-one'
+        mode: inbound.config?.mode || 'stream-one',
+        displayName: inbound.config?.displayName || '',
+        aliases: inbound.config?.aliases || []
       };
       setCurrentInbound({ ...inbound, config });
     } else {
@@ -838,7 +861,9 @@ function AdminDashboard() {
           serviceName: 'grpc-service',
           path: '/xh',
           host: '',
-          mode: 'stream-one'
+          mode: 'stream-one',
+          displayName: '',
+          aliases: []
         }
       });
     }
@@ -919,13 +944,14 @@ function AdminDashboard() {
     if (pkg) {
       setCurrentPackage({ 
         ...pkg,
+        traffic_gb: pkg.traffic ? Number((pkg.traffic / 1073741824).toFixed(2)) : 0,
         allowed_inbounds: pkg.allowed_inbounds ? [...pkg.allowed_inbounds] : []
       });
     } else {
       setCurrentPackage({
         id: '',
         name: '',
-        traffic: 107374182400, // 100GB
+        traffic_gb: 100, // 100GB
         duration_days: 30,
         price: 19.9,
         rule_template: 'default',
@@ -945,7 +971,7 @@ function AdminDashboard() {
     try {
       const payload = {
         name: currentPackage.name,
-        traffic: Number(currentPackage.traffic),
+        traffic: Math.floor(Number(currentPackage.traffic_gb) * 1073741824),
         duration_days: Number(currentPackage.duration_days),
         price: Number(currentPackage.price),
         rule_template: currentPackage.rule_template || 'default',
@@ -1044,58 +1070,39 @@ function AdminDashboard() {
   };
 
   return (
-    <div className="dashboard-container">
-      <header className="glass header-nav">
-        <div className="brand">⚙️ Clash 订阅中控端后台</div>
-        <div className="user-actions">
-          <span className="email-badge admin-badge">管理员: {localStorage.getItem('clash_email')}</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
-          <button className="btn btn-danger btn-sm" onClick={handleLogout}>退出</button>
+    <div className="app-container">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <h1 className="brand" style={{ margin: 0, fontSize: '1.6rem', background: 'linear-gradient(135deg, #a78bfa, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 800 }}>Clash Panel</h1>
         </div>
-      </header>
-
-      {/* Admin Change Password Modal */}
-      {showChangePwd && (
-        <div className="modal-overlay">
-          <div className="modal-content glass" style={{ maxWidth: '400px' }}>
-            <div className="modal-header">
-              <h3>修改管理员密码</h3>
-              <button className="btn-icon" onClick={() => setShowChangePwd(false)}>✕</button>
-            </div>
-            <form onSubmit={handleChangePassword}>
-              <div className="form-group">
-                <label>旧密码</label>
-                <input type="password" required value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label>新密码</label>
-                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label>确认新密码</label>
-                <input type="password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
-              </div>
-              <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setShowChangePwd(false)}>取消</button>
-                <button type="submit" className="btn btn-primary">确认修改</button>
-              </div>
-            </form>
-          </div>
+        <nav className="sidebar-nav">
+          <button className={activeTab === 'summary' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('summary')}>📈 看板总览</button>
+          <button className={activeTab === 'users' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('users')}>👤 用户管理</button>
+          <button className={activeTab === 'nodes' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('nodes')}>📡 节点配置</button>
+          <button className={activeTab === 'inbounds' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('inbounds')}>🔌 入站规则</button>
+          <button className={activeTab === 'packages' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('packages')}>📋 套餐定义</button>
+          <button className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('logs')}>📜 安全审计</button>
+          <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('rules')}>⚙️ 规则模板</button>
+        </nav>
+        <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{localStorage.getItem('clash_email')}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>🔑 修改密码</button>
+          <button className="btn btn-danger btn-sm" onClick={handleLogout}>🚪 安全退出</button>
         </div>
-      )}
+      </aside>
 
-      {/* Admin Nav Tabs */}
-      <nav className="admin-tabs glass">
-        <button className={activeTab === 'summary' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('summary')}>📈 看板总览</button>
-        <button className={activeTab === 'users' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('users')}>👤 用户管理</button>
-        <button className={activeTab === 'nodes' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('nodes')}>📡 节点配置</button>
-        <button className={activeTab === 'inbounds' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('inbounds')}>🔌 入站规则</button>
-        <button className={activeTab === 'packages' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('packages')}>📋 套餐定义</button>
-        <button className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('logs')}>📜 安全审计</button>
-        <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('rules')}>⚙️ 规则模板</button>
-      </nav>
-
-      <main className="dashboard-content">
+      <main className="main-content">
+        <div className="topbar">
+          <h2>
+            {activeTab === 'summary' && '📈 仪表盘总览'}
+            {activeTab === 'users' && '👤 用户管理中心'}
+            {activeTab === 'nodes' && '📡 分布式节点集群'}
+            {activeTab === 'inbounds' && '🔌 全局入站规则'}
+            {activeTab === 'packages' && '📋 套餐与计费策略'}
+            {activeTab === 'logs' && '📜 系统安全审计'}
+            {activeTab === 'rules' && '⚙️ 路由规则模板'}
+          </h2>
+        </div>
         
         {/* TAB 1: SUMMARY */}
         {activeTab === 'summary' && dashboardStats && (
@@ -1126,8 +1133,25 @@ function AdminDashboard() {
                 </div>
               </div>
             </section>
+
+            <section className="grid-2" style={{ marginTop: '1.5rem' }}>
+              <div className="glass-card stat-box">
+                <span className="stat-label">中控网卡实时上行 (Tx)</span>
+                <span className="stat-value" style={{ color: '#00d2ff' }}>
+                  {dashboardStats.server_network?.tx_sec > 0 ? (dashboardStats.server_network.tx_sec / 1024 / 1024).toFixed(2) : '0.00'} MB/s
+                </span>
+                <span className="stat-sub">实时监控面板网络负载</span>
+              </div>
+              <div className="glass-card stat-box">
+                <span className="stat-label">中控网卡实时下行 (Rx)</span>
+                <span className="stat-value" style={{ color: '#00ffcc' }}>
+                  {dashboardStats.server_network?.rx_sec > 0 ? (dashboardStats.server_network.rx_sec / 1024 / 1024).toFixed(2) : '0.00'} MB/s
+                </span>
+                <span className="stat-sub">实时监控面板网络负载</span>
+              </div>
+            </section>
             
-            <div className="glass-card welcome-admin">
+            <div className="glass-card welcome-admin" style={{ marginTop: '1.5rem' }}>
               <h3>⚡ 欢迎使用分布式中控系统</h3>
               <p>当前面板为中控节点，负责向分部在全球的被控端 Xray 实例发送同步命令，并通过 WSS 网关保持实时长连接以进行实时审计与规则防御。</p>
             </div>
@@ -1208,7 +1232,11 @@ function AdminDashboard() {
           <div className="nodes-tab">
             <div className="action-row">
               <h3>📡 节点控制集群</h3>
-              <button className="btn btn-primary btn-sm" onClick={() => handleOpenNodeModal()}>+ 新增节点</button>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button className="btn btn-warning btn-sm" onClick={() => setReportIntervalModalOpen(true)}>⚙️ 刷新时间设置</button>
+                <button className="btn btn-primary btn-sm" onClick={handleForceReportAll}>🔄 一键强制刷新</button>
+                <button className="btn btn-primary btn-sm" onClick={() => handleOpenNodeModal()}>+ 新增节点</button>
+              </div>
             </div>
             
             <div className="table-container">
@@ -1269,7 +1297,6 @@ function AdminDashboard() {
                             }}>📋 复制脚本</button>
                           </td>
                           <td className="cell-actions">
-                            <button className="btn-icon" title="强制汇报" onClick={() => handleForceReport(n.id)}>🔄</button>
                             <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}>✏️</button>
                             <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}>🗑</button>
                           </td>
@@ -1319,9 +1346,10 @@ function AdminDashboard() {
                         summary = `Path: ${inb.config?.path || '/xh'} | Mode: ${inb.config?.mode || 'stream-one'}`;
                       }
                       const parentNode = nodes.find(n => n.id === inb.node_id);
+                      const displayName = inb.config?.displayName ? `${inb.config.displayName} (自定义)` : (parentNode ? parentNode.name : inb.node_id);
                       return (
                         <tr key={inb.id}>
-                          <td style={{ fontWeight: 600 }}>{parentNode ? parentNode.name : inb.node_id}</td>
+                          <td style={{ fontWeight: 600 }}>{displayName}</td>
                           <td style={{ fontWeight: 600, color: 'var(--success)' }}>{inb.port}</td>
                           <td><span className="badge badge-info">{inb.protocol.toUpperCase()}</span></td>
                           <td><span className="badge badge-info">{inb.network.toUpperCase()}</span></td>
@@ -1752,14 +1780,15 @@ function AdminDashboard() {
               </div>
 
               <div className="form-group">
-                <label>包含限额流量 (字节)</label>
+                <label>包含限额流量 (GB)</label>
                 <input 
                   type="number" 
-                  value={currentPackage.traffic} 
-                  onChange={(e) => setCurrentPackage({ ...currentPackage, traffic: Number(e.target.value) })}
+                  step="0.01"
+                  value={currentPackage.traffic_gb} 
+                  onChange={(e) => setCurrentPackage({ ...currentPackage, traffic_gb: Number(e.target.value) })}
                   required
                 />
-                <span className="form-hint">当前输入相当于: {formatTraffic(currentPackage.traffic)}</span>
+                <span className="form-hint">当前输入相当于: {formatTraffic(currentPackage.traffic_gb * 1073741824)}</span>
               </div>
 
               <div className="form-row">
@@ -1846,16 +1875,27 @@ function AdminDashboard() {
               <button className="btn-icon" onClick={() => setInboundModalOpen(false)}>✕</button>
             </div>
             <form onSubmit={handleSaveInbound}>
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label>所属节点 (必填)</label>
-                <select 
-                  value={currentInbound.node_id} 
-                  onChange={(e) => setCurrentInbound({ ...currentInbound, node_id: e.target.value })}
-                  required
-                >
-                  <option value="" disabled>请选择一个节点</option>
-                  {nodes.map(n => <option key={n.id} value={n.id}>{n.name} ({n.server})</option>)}
-                </select>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>所属节点 (必填)</label>
+                  <select 
+                    value={currentInbound.node_id} 
+                    onChange={(e) => setCurrentInbound({ ...currentInbound, node_id: e.target.value })}
+                    required
+                  >
+                    <option value="" disabled>请选择一个节点</option>
+                    {nodes.map(n => <option key={n.id} value={n.id}>{n.name} ({n.server})</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>自定义显示名称 (可选)</label>
+                  <input 
+                    type="text" 
+                    value={currentInbound.config?.displayName || ''} 
+                    onChange={(e) => setCurrentInbound({ ...currentInbound, config: { ...currentInbound.config, displayName: e.target.value } })}
+                    placeholder="客户端中显示的节点名称"
+                  />
+                </div>
               </div>
               <div className="form-row">
                 <div className="form-group">
@@ -2092,6 +2132,76 @@ function AdminDashboard() {
                 </div>
               )}
 
+              {/* ALIASES MANAGEMENT */}
+              <div className="aliases-section-box glass" style={{ padding: '1.5rem', marginTop: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--primary)' }}>多入口别名配置 (可选)</span>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+                    const newAliases = [...(currentInbound.config?.aliases || []), { name: '', server: '', port: 443 }];
+                    setCurrentInbound(prev => ({
+                      ...prev,
+                      config: { ...prev.config, aliases: newAliases }
+                    }));
+                  }}>+ 添加别名入口</button>
+                </div>
+                {currentInbound.config?.aliases?.length > 0 ? (
+                  currentInbound.config.aliases.map((alias, idx) => (
+                    <div key={idx} className="form-row" style={{ alignItems: 'flex-end', marginBottom: '0.8rem', background: 'rgba(0,0,0,0.2)', padding: '0.8rem', borderRadius: '6px' }}>
+                      <div className="form-group" style={{ flex: 1.5, marginBottom: 0 }}>
+                        <label>别名展示名称</label>
+                        <input 
+                          type="text" 
+                          value={alias.name} 
+                          placeholder="例如：HK-专线"
+                          required
+                          onChange={(e) => {
+                            const newAliases = [...currentInbound.config.aliases];
+                            newAliases[idx].name = e.target.value;
+                            setCurrentInbound(prev => ({ ...prev, config: { ...prev.config, aliases: newAliases } }));
+                          }}
+                        />
+                      </div>
+                      <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+                        <label>连接地址 (覆盖主IP/域名)</label>
+                        <input 
+                          type="text" 
+                          value={alias.server} 
+                          placeholder="中转IP / IPv6地址"
+                          required
+                          onChange={(e) => {
+                            const newAliases = [...currentInbound.config.aliases];
+                            newAliases[idx].server = e.target.value;
+                            setCurrentInbound(prev => ({ ...prev, config: { ...prev.config, aliases: newAliases } }));
+                          }}
+                        />
+                      </div>
+                      <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                        <label>连接端口</label>
+                        <input 
+                          type="number" 
+                          value={alias.port} 
+                          required
+                          onChange={(e) => {
+                            const newAliases = [...currentInbound.config.aliases];
+                            newAliases[idx].port = Number(e.target.value);
+                            setCurrentInbound(prev => ({ ...prev, config: { ...prev.config, aliases: newAliases } }));
+                          }}
+                        />
+                      </div>
+                      <button type="button" className="btn-icon danger" title="删除别名" onClick={() => {
+                        const newAliases = [...currentInbound.config.aliases];
+                        newAliases.splice(idx, 1);
+                        setCurrentInbound(prev => ({ ...prev, config: { ...prev.config, aliases: newAliases } }));
+                      }} style={{ padding: '0.5rem', marginBottom: '2px' }}>🗑</button>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ fontSize: '0.85rem', color: '#888' }}>
+                    通过添加别名，可以在不新建实际物理监听端口的情况下，给订阅下发专线IP、IPv6入口等额外节点配置。所有别名的流量均汇聚合并计算。
+                  </div>
+                )}
+              </div>
+
               <div className="modal-footer" style={{ marginTop: '1.5rem' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setInboundModalOpen(false)}>取消</button>
                 <button type="submit" className="btn btn-primary">保存入站规则</button>
@@ -2144,6 +2254,64 @@ function AdminDashboard() {
         </div>
       )}
 
+      {showChangePwd && (
+        <div className="modal-overlay">
+          <div className="modal-content glass" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3>修改管理员密码</h3>
+              <button className="btn-icon" onClick={() => setShowChangePwd(false)}>✕</button>
+            </div>
+            <form onSubmit={handleChangePassword}>
+              <div className="form-group">
+                <label>旧密码</label>
+                <input type="password" required value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>新密码</label>
+                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>确认新密码</label>
+                <input type="password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+              </div>
+              <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowChangePwd(false)}>取消</button>
+                <button type="submit" className="btn btn-primary">确认修改</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Global Report Interval Modal */}
+      {reportIntervalModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content glass" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3>全局刷新时间设置</h3>
+              <button className="btn-icon" onClick={() => setReportIntervalModalOpen(false)}>✕</button>
+            </div>
+            <form onSubmit={handleUpdateReportInterval}>
+              <div className="form-group">
+                <label>节点汇报间隔时间 (秒)</label>
+                <input 
+                  type="number" 
+                  min="5" 
+                  required 
+                  value={intervalSecs} 
+                  onChange={e => setIntervalSecs(e.target.value)} 
+                  placeholder="例如：30"
+                />
+                <small className="help-text">设置后，所有节点将以此间隔向中控汇报流量和负载信息。建议不低于 15 秒。</small>
+              </div>
+              <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setReportIntervalModalOpen(false)}>取消</button>
+                <button type="submit" className="btn btn-primary">保存设置</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
