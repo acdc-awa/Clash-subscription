@@ -893,7 +893,7 @@ function AdminDashboard() {
         showToast('新入站规则已注册，已同步下发至节点', 'success');
       }
       setInboundModalOpen(false);
-      fetchInbounds(selectedNodeForInbounds.id);
+      fetchInbounds(selectedNodeForInbounds?.id || null);
       fetchAdminData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -905,7 +905,7 @@ function AdminDashboard() {
     try {
       await apiFetch('DELETE', `/api/inbounds/${id}`);
       showToast('入站配置已成功下线', 'success');
-      fetchInbounds(selectedNodeForInbounds.id);
+      fetchInbounds(selectedNodeForInbounds?.id || null);
       fetchAdminData();
     } catch (err) {
       showToast(err.message, 'error');
