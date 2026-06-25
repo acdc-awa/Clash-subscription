@@ -345,6 +345,9 @@ function connectWS() {
     // Request initial config sync
     ws.send(JSON.stringify({ type: 'sync_request' }));
 
+    // Report stats immediately upon connection
+    reportCycle();
+
     // Start periodic reporting (every 30 seconds)
     if (reportInterval) clearInterval(reportInterval);
     reportInterval = setInterval(reportCycle, 30000);
