@@ -759,22 +759,34 @@ app.put('/api/users/:uuid', authenticate, requireAdmin, (req, res) => {
     const isNowActive = (status || newUser.status) === 'active';
 
     if (!isNowActive) {
-      for (const nId of oldAllowedNodes) {
-        pushUserDelFromNode(nId, oldUser.email);
+      if (oldUser.status === 'active') {
+        for (const nId of oldAllowedNodes) {
+          pushUserDelFromNode(nId, oldUser.email);
+        }
       }
     } else {
-      const removedNodes = oldAllowedNodes.filter(x => !newAllowedNodes.includes(x));
+      let removedNodes = [];
+      let addedNodes = [];
+
+      if (oldUser.status !== 'active') {
+        // Transitioning from inactive to active: all nodes are 'added'
+        addedNodes = [...newAllowedNodes];
+      } else {
+        // Active to active: calculate diffs
+        removedNodes = oldAllowedNodes.filter(x => !newAllowedNodes.includes(x));
+        addedNodes = newAllowedNodes.filter(x => !oldAllowedNodes.includes(x));
+      }
+
       for (const nId of removedNodes) {
         pushUserDelFromNode(nId, oldUser.email);
       }
 
-      const addedNodes = newAllowedNodes.filter(x => !oldAllowedNodes.includes(x));
       for (const nId of addedNodes) {
         pushUserAddtoNode(nId, email || oldUser.email, userUuid);
       }
 
       // If email changed, handle update on overlapping nodes
-      if (email && email !== oldUser.email) {
+      if (email && email !== oldUser.email && oldUser.status === 'active') {
         const intersectNodes = oldAllowedNodes.filter(x => newAllowedNodes.includes(x));
         for (const nId of intersectNodes) {
           pushUserDelFromNode(nId, oldUser.email);

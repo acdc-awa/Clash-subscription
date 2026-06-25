@@ -711,7 +711,7 @@ function AdminDashboard() {
   const handleResetUserTraffic = async (user) => {
     if (!window.confirm(`确认重置用户 "${user.email}" 的累计已用流量吗？`)) return;
     try {
-      await apiFetch('PUT', `/api/users/${user.uuid}`, { ...user, used_traffic: 0 });
+      await apiFetch('PUT', `/api/users/${user.uuid}`, { ...user, used_traffic: 0, status: 'active' });
       showToast('已重置该用户的流量计数器', 'success');
       fetchAdminData();
     } catch (err) {
