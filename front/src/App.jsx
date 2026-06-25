@@ -583,6 +583,13 @@ function AdminDashboard() {
       } else if (activeTab === 'nodes') {
         const nodesList = await apiFetch('GET', '/api/nodes');
         setNodes(nodesList);
+      } else if (activeTab === 'inbounds') {
+        const [inboundsList, nodesList] = await Promise.all([
+          apiFetch('GET', '/api/inbounds'),
+          apiFetch('GET', '/api/nodes')
+        ]);
+        setInbounds(inboundsList);
+        setNodes(nodesList);
       } else if (activeTab === 'packages') {
         const [pkgsList, nodesList, rulesList, inboundsList] = await Promise.all([
           apiFetch('GET', '/api/packages'),
@@ -814,7 +821,7 @@ function AdminDashboard() {
       setCurrentInbound({ ...inbound, config });
     } else {
       setCurrentInbound({
-        node_id: selectedNodeForInbounds.id,
+        node_id: nodes.length > 0 ? nodes[0].id : '',
         port: 443,
         protocol: 'vless',
         network: 'tcp',
@@ -1082,6 +1089,7 @@ function AdminDashboard() {
         <button className={activeTab === 'summary' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('summary')}>📈 看板总览</button>
         <button className={activeTab === 'users' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('users')}>👤 用户管理</button>
         <button className={activeTab === 'nodes' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('nodes')}>📡 节点配置</button>
+        <button className={activeTab === 'inbounds' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('inbounds')}>🔌 入站规则</button>
         <button className={activeTab === 'packages' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('packages')}>📋 套餐定义</button>
         <button className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('logs')}>📜 安全审计</button>
         <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('rules')}>⚙️ 规则模板</button>
@@ -1235,7 +1243,7 @@ function AdminDashboard() {
                             </span>
                           </td>
                           <td>
-                            <span className="badge badge-info" style={{ cursor: 'pointer' }} onClick={() => handleOpenInboundsList(n)}>
+                            <span className="badge badge-info">
                               {n.inbounds_count || 0} 个入站
                             </span>
                           </td>
@@ -1262,7 +1270,6 @@ function AdminDashboard() {
                           </td>
                           <td className="cell-actions">
                             <button className="btn-icon" title="强制汇报" onClick={() => handleForceReport(n.id)}>🔄</button>
-                            <button className="btn-icon" title="管理入站" onClick={() => handleOpenInboundsList(n)}>⚙️</button>
                             <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}>✏️</button>
                             <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}>🗑</button>
                           </td>
@@ -1274,71 +1281,67 @@ function AdminDashboard() {
               </table>
             </div>
 
-            {/* INBOUNDS SUB-PANEL */}
-            {selectedNodeForInbounds && (
-              <div className="inbounds-sub-panel glass-card" style={{ marginTop: '2rem', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.15)' }}>
-                <div className="action-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <h4 style={{ margin: 0, fontSize: '1.2rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span>⚙️ 入站规则配置列表</span>
-                    <span className="badge badge-info" style={{ fontSize: '0.85rem' }}>
-                      节点: {selectedNodeForInbounds.name} ({selectedNodeForInbounds.id})
-                    </span>
-                  </h4>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => handleOpenInboundModal()}>+ 新增入站规则</button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setSelectedNodeForInbounds(null)}>✕ 关闭</button>
-                  </div>
-                </div>
-                
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>端口</th>
-                        <th>代理协议</th>
-                        <th>传输网络</th>
-                        <th>安全机制</th>
-                        <th>核心参数摘要</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {inbounds.length === 0 ? (
-                        <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>该节点暂无任何入站配置，点击“新增入站规则”进行配置。</td></tr>
-                      ) : (
-                        inbounds.map((inb) => {
-                          let summary = '-';
-                          if (inb.security === 'reality') {
-                            summary = `目标: ${inb.config?.dest || 'www.microsoft.com:443'} | SNI: ${inb.config?.serverNames?.[0] || 'www.microsoft.com'}`;
-                          } else if (inb.network === 'grpc') {
-                            summary = `Service: ${inb.config?.serviceName || 'grpc-service'}`;
-                          } else if (inb.network === 'xhttp') {
-                            summary = `Path: ${inb.config?.path || '/xh'} | Mode: ${inb.config?.mode || 'stream-one'}`;
-                          }
-                          return (
-                            <tr key={inb.id}>
-                              <td style={{ fontWeight: 600, color: 'var(--success)' }}>{inb.port}</td>
-                              <td><span className="badge badge-info">{inb.protocol.toUpperCase()}</span></td>
-                              <td><span className="badge badge-info">{inb.network.toUpperCase()}</span></td>
-                              <td>
-                                <span className={`badge ${inb.security === 'reality' ? 'badge-success' : 'badge-warning'}`}>
-                                  {inb.security.toUpperCase()}
-                                </span>
-                              </td>
-                              <td style={{ fontSize: '0.85rem', color: '#ccc' }}>{summary}</td>
-                              <td className="cell-actions">
-                                <button className="btn-icon" title="编辑" onClick={() => handleOpenInboundModal(inb)}>✏️</button>
-                                <button className="btn-icon danger" title="删除" onClick={() => handleDeleteInbound(inb.id)}>🗑</button>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+          </div>
+        )}
+
+        {/* TAB 3.5: INBOUNDS */}
+        {activeTab === 'inbounds' && (
+          <div className="inbounds-tab">
+            <div className="action-row">
+              <h3>🔌 全局入站规则管理</h3>
+              <button className="btn btn-primary btn-sm" onClick={() => handleOpenInboundModal()}>+ 新增入站规则</button>
+            </div>
+            
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>所属节点</th>
+                    <th>端口</th>
+                    <th>代理协议</th>
+                    <th>传输网络</th>
+                    <th>安全机制</th>
+                    <th>核心参数摘要</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inbounds.length === 0 ? (
+                    <tr><td colSpan="7" style={{ textAlign: 'center', padding: '2rem' }}>暂无任何入站配置，请点击“新增入站规则”进行配置。</td></tr>
+                  ) : (
+                    inbounds.map((inb) => {
+                      let summary = '-';
+                      if (inb.security === 'reality') {
+                        summary = `目标: ${inb.config?.dest || 'www.microsoft.com:443'} | SNI: ${inb.config?.serverNames?.[0] || 'www.microsoft.com'}`;
+                      } else if (inb.network === 'grpc') {
+                        summary = `Service: ${inb.config?.serviceName || 'grpc-service'}`;
+                      } else if (inb.network === 'xhttp') {
+                        summary = `Path: ${inb.config?.path || '/xh'} | Mode: ${inb.config?.mode || 'stream-one'}`;
+                      }
+                      const parentNode = nodes.find(n => n.id === inb.node_id);
+                      return (
+                        <tr key={inb.id}>
+                          <td style={{ fontWeight: 600 }}>{parentNode ? parentNode.name : inb.node_id}</td>
+                          <td style={{ fontWeight: 600, color: 'var(--success)' }}>{inb.port}</td>
+                          <td><span className="badge badge-info">{inb.protocol.toUpperCase()}</span></td>
+                          <td><span className="badge badge-info">{inb.network.toUpperCase()}</span></td>
+                          <td>
+                            <span className={`badge ${inb.security === 'reality' ? 'badge-success' : 'badge-warning'}`}>
+                              {inb.security.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: '0.85rem', color: '#ccc' }}>{summary}</td>
+                          <td className="cell-actions">
+                            <button className="btn-icon" title="编辑" onClick={() => handleOpenInboundModal(inb)}>✏️</button>
+                            <button className="btn-icon danger" title="删除" onClick={() => handleDeleteInbound(inb.id)}>🗑</button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -1843,6 +1846,17 @@ function AdminDashboard() {
               <button className="btn-icon" onClick={() => setInboundModalOpen(false)}>✕</button>
             </div>
             <form onSubmit={handleSaveInbound}>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label>所属节点 (必填)</label>
+                <select 
+                  value={currentInbound.node_id} 
+                  onChange={(e) => setCurrentInbound({ ...currentInbound, node_id: Number(e.target.value) })}
+                  required
+                >
+                  <option value="" disabled>请选择一个节点</option>
+                  {nodes.map(n => <option key={n.id} value={n.id}>{n.name} ({n.server})</option>)}
+                </select>
+              </div>
               <div className="form-row">
                 <div className="form-group">
                   <label>监听端口 (必填)</label>
