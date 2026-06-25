@@ -358,16 +358,23 @@ function connectWS() {
           try {
             const tmpFile = `/tmp/xray-adu-${uuid}-${inb.tag}.json`;
             const apiPayload = {
-              inboundTag: inb.tag,
-              user: {
-                email: email,
-                level: 0,
-                account: {
-                  "@type": "type.googleapis.com/xray.proxy.vless.Account",
-                  id: uuid,
-                  flow: inb.flow || ""
+              inbounds: [
+                {
+                  port: inb.port || 443,
+                  tag: inb.tag,
+                  protocol: inb.protocol || "vless",
+                  settings: {
+                    decryption: "none",
+                    clients: [
+                      {
+                        id: uuid,
+                        email: email,
+                        flow: inb.flow || ""
+                      }
+                    ]
+                  }
                 }
-              }
+              ]
             };
             fs.writeFileSync(tmpFile, JSON.stringify(apiPayload));
             await runCmd(`xray api adu -server=${XRAY_API_ADDRESS} ${tmpFile}`);

@@ -66,6 +66,8 @@ function pushUserEventToAllowedNodes(userUuid, email, eventType) {
         `).all(nodeId, userUuid);
         const inboundDetails = inbounds.map(inb => ({
           tag: `${nodeId}_${inb.port}`,
+          port: inb.port,
+          protocol: 'vless',
           flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : ''
         }));
 
