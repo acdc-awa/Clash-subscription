@@ -460,6 +460,20 @@ app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
   }
 });
 
+app.post('/api/nodes/:id/force-report', authenticate, requireAdmin, (req, res) => {
+  try {
+    const id = req.params.id;
+    const ws = activeNodes.get(id);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return res.status(404).json({ error: '节点离线或未连接' });
+    }
+    ws.send(JSON.stringify({ event: 'FORCE_REPORT' }));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
   try {
     const id = req.params.id;
@@ -1598,7 +1612,8 @@ wss.on('connection', (ws, request) => {
           data: {
             inbounds: xrayInbounds, // For daemon UFW processing
             config: fullConfig,     // Complete ready-to-write JSON config
-            restart: payload.restart !== false // default to true if not strictly false
+            restart: payload.restart !== false, // default to true if not strictly false
+            report_interval: advConfig.report_interval ? Number(advConfig.report_interval) : 30
           }
         }));
       }

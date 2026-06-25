@@ -301,6 +301,15 @@ async function reportCycle() {
   }
 }
 
+const INTERVAL_PATH = '/etc/xray-daemon/interval.json';
+
+function startReportCycle(intervalSeconds) {
+  if (reportInterval) clearInterval(reportInterval);
+  const ms = intervalSeconds * 1000;
+  reportInterval = setInterval(reportCycle, ms);
+  console.log(`[Config] Heartbeat and report interval set to ${intervalSeconds} seconds.`);
+}
+
 // ------------------------------------------------------------
 // WebSocket Connection & Handshake
 // ------------------------------------------------------------
@@ -326,9 +335,14 @@ function connectWS() {
     // Report stats immediately upon connection
     reportCycle();
 
-    // Start periodic reporting (every 30 seconds)
-    if (reportInterval) clearInterval(reportInterval);
-    reportInterval = setInterval(reportCycle, 30000);
+    // Start periodic reporting
+    let interval = 30;
+    try {
+      if (fs.existsSync(INTERVAL_PATH)) {
+        interval = JSON.parse(fs.readFileSync(INTERVAL_PATH, 'utf8')).interval || 30;
+      }
+    } catch (e) {}
+    startReportCycle(interval);
   });
 
   ws.on('message', async (message) => {
@@ -337,9 +351,17 @@ function connectWS() {
       
       if (payload.event === 'SYNC_RESPONSE') {
         const inbounds = payload.data.inbounds || [];
+        const report_interval = payload.data.report_interval || 30;
         console.log(`[WebSocket] Received SYNC_RESPONSE containing ${inbounds.length} inbounds.`);
         
-        // Extract ports to configure firewall rules
+        try {
+          fs.writeFileSync(INTERVAL_PATH, JSON.stringify({ interval: report_interval }), 'utf8');
+        } catch (e) {
+          console.error("[-] Failed to save interval.json:", e.message);
+        }
+        startReportCycle(report_interval);
+        
+        // 1. Process UFW rules for the new inbounds
         const ports = inbounds.map(inb => inb.port);
         await applyUfwRules(ports);
         
@@ -399,6 +421,9 @@ function connectWS() {
         console.log(`[WebSocket] Received FORCE_RELOAD. Triggering hard reload...`);
         await reportCycle();
         ws.send(JSON.stringify({ type: 'sync_request', restart: true }));
+      } else if (payload.event === 'FORCE_REPORT') {
+        console.log(`[WebSocket] Received FORCE_REPORT. Triggering immediate report cycle.`);
+        await reportCycle();
       } else if (payload.event === 'RESTART_XRAY') {
         console.log(`[WebSocket] Received RESTART_XRAY. Executing restart...`);
         await restartXray();

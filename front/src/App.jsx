@@ -771,6 +771,15 @@ function AdminDashboard() {
     }
   };
 
+  const handleForceReport = async (id) => {
+    try {
+      await apiFetch('POST', `/api/nodes/${id}/force-report`);
+      showToast('强制汇报指令已下发，稍后请刷新页面查看', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const handleDeleteNode = async (id) => {
     if (!window.confirm(`确定要彻底删除节点 "${id}" 并阻断其Daemon长连接吗？`)) return;
     try {
@@ -1252,6 +1261,7 @@ function AdminDashboard() {
                             }}>📋 复制脚本</button>
                           </td>
                           <td className="cell-actions">
+                            <button className="btn-icon" title="强制汇报" onClick={() => handleForceReport(n.id)}>🔄</button>
                             <button className="btn-icon" title="管理入站" onClick={() => handleOpenInboundsList(n)}>⚙️</button>
                             <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}>✏️</button>
                             <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}>🗑</button>
@@ -1666,6 +1676,21 @@ function AdminDashboard() {
                       advanced_config: { ...currentNode.advanced_config, restart_time: e.target.value }
                     })} 
                     style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', padding: '4px 8px', borderRadius: '4px' }}
+                  />
+                </div>
+
+                <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ color: '#e2e8f0', fontSize: '0.9rem' }}>心跳与上报间隔 (秒):</label>
+                  <input 
+                    type="number" 
+                    min="5"
+                    max="300"
+                    value={currentNode.advanced_config?.report_interval || "30"}
+                    onChange={(e) => setCurrentNode({ 
+                      ...currentNode, 
+                      advanced_config: { ...currentNode.advanced_config, report_interval: e.target.value }
+                    })} 
+                    style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', padding: '4px 8px', borderRadius: '4px', width: '80px' }}
                   />
                 </div>
               </div>
