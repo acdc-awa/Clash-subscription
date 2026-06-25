@@ -17,7 +17,8 @@ if command -v git &> /dev/null; then
     # Try SSH
     if git clone --depth 1 "$REPO_SSH" temp_repo_ssh &> /dev/null; then
         echo "正在将 backend 内容释放到当前目录..."
-        # 复制所有内容（包含隐藏文件，如 .env / .gitignore）到当前目录
+        # 删除仓库中的用户配置和数据文件，避免覆盖本地现有数据
+        rm -f temp_repo_ssh/backend/.env temp_repo_ssh/backend/data.db
         cp -r temp_repo_ssh/backend/. ./
         rm -rf temp_repo_ssh
         echo "✅ 成功使用 SSH 拉取并释放 backend 内容！"
@@ -27,6 +28,7 @@ if command -v git &> /dev/null; then
     # Try HTTPS (in case SSH is not authorized on this server)
     if git clone --depth 1 "$REPO_HTTPS" temp_repo_https &> /dev/null; then
         echo "正在将 backend 内容释放到当前目录..."
+        rm -f temp_repo_https/backend/.env temp_repo_https/backend/data.db
         cp -r temp_repo_https/backend/. ./
         rm -rf temp_repo_https
         echo "✅ 成功使用 HTTPS 拉取并释放 backend 内容！"
@@ -47,6 +49,7 @@ if [ -f temp_repo.zip ]; then
 
     echo "正在解压并释放 backend 内容到当前目录..."
     unzip -q temp_repo.zip "Clash-subscription-main/backend/*"
+    rm -f Clash-subscription-main/backend/.env Clash-subscription-main/backend/data.db
     cp -r Clash-subscription-main/backend/. ./
     rm -rf Clash-subscription-main temp_repo.zip
     echo "✅ 成功使用 curl/Zip 拉取并释放 backend 内容！"

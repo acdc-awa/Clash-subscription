@@ -7,11 +7,26 @@ const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const fs = require('fs');
 const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'clash-sub-secret';
+let JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  const envPath = path.join(__dirname, '.env');
+  try {
+    let envContent = '';
+    try { envContent = fs.readFileSync(envPath, 'utf-8'); } catch {}
+    if (!envContent.includes('JWT_SECRET=')) {
+      fs.appendFileSync(envPath, `\nJWT_SECRET=${JWT_SECRET}\n`);
+      console.warn('[Security] JWT_SECRET 未配置，已自动生成并持久化到 .env 文件。');
+    }
+  } catch (e) {
+    console.warn('[Security] JWT_SECRET 未配置，已自动生成（仅本次运行有效，无法写入 .env）。');
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -34,7 +49,18 @@ function pushUserEventToAllowedNodes(userUuid, email, eventType) {
       const ws = activeNodes.get(nodeId);
       if (ws && ws.readyState === WebSocket.OPEN) {
         if (eventType === 'USER_ADD') {
-          ws.send(JSON.stringify({ event: 'USER_ADD', data: { email, uuid: userUuid } }));
+          // 查询该节点上用户可访问的入站配置，包含 flow 信息
+          const inbounds = db.prepare(`
+            SELECT i.port, i.network, i.security FROM inbounds i
+            JOIN package_inbounds pi ON i.id = pi.inbound_id
+            JOIN users u ON u.package_id = pi.package_id
+            WHERE i.node_id = ? AND u.uuid = ?
+          `).all(nodeId, userUuid);
+          const inboundDetails = inbounds.map(inb => ({
+            tag: `${nodeId}_${inb.port}`,
+            flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : ''
+          }));
+          ws.send(JSON.stringify({ event: 'USER_ADD', data: { email, uuid: userUuid, inbounds: inboundDetails } }));
         } else if (eventType === 'USER_DEL') {
           ws.send(JSON.stringify({ event: 'USER_DEL', data: { email } }));
         }
@@ -49,7 +75,17 @@ function pushUserEventToAllowedNodes(userUuid, email, eventType) {
 function pushUserAddtoNode(nodeId, email, userUuid) {
   const ws = activeNodes.get(nodeId);
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ event: 'USER_ADD', data: { email, uuid: userUuid } }));
+    const inbounds = db.prepare(`
+      SELECT i.port, i.network, i.security FROM inbounds i
+      JOIN package_inbounds pi ON i.id = pi.inbound_id
+      JOIN users u ON u.package_id = pi.package_id
+      WHERE i.node_id = ? AND u.uuid = ?
+    `).all(nodeId, userUuid);
+    const inboundDetails = inbounds.map(inb => ({
+      tag: `${nodeId}_${inb.port}`,
+      flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : ''
+    }));
+    ws.send(JSON.stringify({ event: 'USER_ADD', data: { email, uuid: userUuid, inbounds: inboundDetails } }));
   }
 }
 
@@ -336,6 +372,18 @@ app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
     db.transaction(() => {
       db.prepare('UPDATE nodes SET id = ?, name = ?, server = ?, multiplier = ? WHERE id = ?')
         .run(newId, name, server, mult, oldId);
+
+      // 修复 inbound 主键：node_id 通过级联更新了，但 id 前缀仍是旧 node_id
+      if (newId !== oldId) {
+        const inbs = db.prepare('SELECT id, port FROM inbounds WHERE node_id = ?').all(newId);
+        const updateInbStmt = db.prepare('UPDATE inbounds SET id = ? WHERE id = ?');
+        for (const inb of inbs) {
+          const newInbId = `${newId}_${inb.port}`;
+          if (inb.id !== newInbId) {
+            updateInbStmt.run(newInbId, inb.id);
+          }
+        }
+      }
     })();
 
     // Disconnect old WebSocket to force daemon reconnect and reload config
@@ -795,6 +843,14 @@ app.delete('/api/packages/:id', authenticate, requireAdmin, (req, res) => {
     const pkg = db.prepare('SELECT name FROM packages WHERE id = ?').get(id);
     if (!pkg) return res.status(404).json({ error: '套餐不存在' });
 
+    // 删除前先踢出所有使用该套餐的活跃用户（删除后外键 SET NULL 会丢失关联）
+    const affectedUsers = db.prepare(
+      "SELECT uuid, email FROM users WHERE package_id = ? AND status = 'active'"
+    ).all(id);
+    for (const u of affectedUsers) {
+      pushUserEventToAllowedNodes(u.uuid, u.email, 'USER_DEL');
+    }
+
     // Clean up package_inbounds handles automatically by Cascade
     db.prepare('DELETE FROM packages WHERE id = ?').run(id);
     writeLog('DELETE_PACKAGE', pkg.name, `删除了套餐 ${pkg.name}`, req);
@@ -1123,7 +1179,7 @@ function injectProxies(template, allowedNodes, unallowedNodeIds) {
     }
   }
 
-  result = result.replace(/([ \t]*)-[ \t]*(?:"all"|'all'|all)[ \t]*(?:#.*)?(\r?\n|$)/gi, (match, spaces, newline) => {
+  result = result.replace(/([ \t]*)-[ \t]*(?:"all"|'all'|\ball\b)[ \t]*(?:#.*)?(\r?\n|$)/gi, (match, spaces, newline) => {
     if (allowedNodes.length === 0) {
       return "";
     }
@@ -1219,7 +1275,11 @@ wss.on('connection', (ws, request) => {
     return;
   }
 
-  const nodeSecret = nodeRow.secret || process.env.PROXY_SECRET || 'default-node-secret';
+  const nodeSecret = nodeRow.secret;
+  if (!nodeSecret) {
+    ws.close(4005, '认证失败：节点密钥未配置');
+    return;
+  }
   const nodeMultiplier = nodeRow.multiplier !== undefined ? nodeRow.multiplier : 1.0;
 
   // Verify HMAC signature
@@ -1234,7 +1294,15 @@ wss.on('connection', (ws, request) => {
 
   // Connection Approved!
   console.log(`[WebSocket] Node Daemon "${nodeId}" connected and authenticated.`);
+
+  // 如果存在旧连接，主动关闭避免竞态
+  const oldWs = activeNodes.get(nodeId);
+  if (oldWs && oldWs !== ws && oldWs.readyState === WebSocket.OPEN) {
+    oldWs.close(4000, '新的守护进程连接已建立');
+  }
   activeNodes.set(nodeId, ws);
+  ws._isAlive = true;
+  ws.on('pong', () => { ws._isAlive = true; });
 
   ws.on('message', (message) => {
     try {
@@ -1288,6 +1356,15 @@ wss.on('connection', (ws, request) => {
                 `).get(email);
 
                 if (user) {
+                  // 检查用户是否已过期（时间维度）
+                  if (user.expiry_time && user.expiry_time <= new Date().toISOString().split('T')[0]) {
+                    if (user.status === 'active') {
+                      db.prepare("UPDATE users SET status = 'expired' WHERE email = ?").run(email);
+                      console.log(`[WebSocket] User ${email} expired (past expiry_time). Status set to expired.`);
+                    }
+                    continue;
+                  }
+
                   let finalExpiry = user.expiry_time;
                   let finalActivation = user.activation_time;
 
@@ -1313,12 +1390,8 @@ wss.on('connection', (ws, request) => {
                     console.log(`[WebSocket] User ${email} has run out of traffic (${updatedUsed} >= ${limit}). Revoking access dynamically...`);
                     db.prepare("UPDATE users SET status = 'expired' WHERE email = ?").run(email);
                     
-                    // Instantly push USER_DEL to all online node daemons
-                    for (const [_, clientWs] of activeNodes.entries()) {
-                      if (clientWs.readyState === WebSocket.OPEN) {
-                        clientWs.send(JSON.stringify({ event: 'USER_DEL', data: { email } }));
-                      }
-                    }
+                    // 向用户有权访问的节点推送踢出事件
+                    pushUserEventToAllowedNodes(user.uuid, email, 'USER_DEL');
                   }
                 }
               }
@@ -1403,12 +1476,17 @@ wss.on('connection', (ws, request) => {
 
   ws.on('close', () => {
     console.log(`[WebSocket] Node Daemon "${nodeId}" disconnected.`);
-    activeNodes.delete(nodeId);
+    // 只有当 Map 中存的仍然是当前 ws 时才删除，避免误删重连后的新连接
+    if (activeNodes.get(nodeId) === ws) {
+      activeNodes.delete(nodeId);
+    }
   });
   
   ws.on('error', (err) => {
     console.error(`[WebSocket] Error in node "${nodeId}":`, err);
-    activeNodes.delete(nodeId);
+    if (activeNodes.get(nodeId) === ws) {
+      activeNodes.delete(nodeId);
+    }
   });
 });
 
@@ -1416,3 +1494,44 @@ wss.on('connection', (ws, request) => {
 server.listen(PORT, () => {
   console.log(`VPS Clash Subscription Controller backend listening on port ${PORT}`);
 });
+
+// WebSocket 心跳检测（每 30 秒 ping 一次，超时则强制断开僵尸连接）
+const heartbeatInterval = setInterval(() => {
+  for (const [hbNodeId, clientWs] of activeNodes.entries()) {
+    if (clientWs._isAlive === false) {
+      console.log(`[Heartbeat] Node "${hbNodeId}" heartbeat timeout, terminating connection.`);
+      clientWs.terminate();
+      continue;
+    }
+    clientWs._isAlive = false;
+    clientWs.ping();
+  }
+}, 30000);
+
+wss.on('close', () => clearInterval(heartbeatInterval));
+
+// 定时检查用户过期状态（每 60 秒）
+setInterval(() => {
+  try {
+    const now = new Date().toISOString().split('T')[0];
+    const expiredUsers = db.prepare(`
+      SELECT uuid, email FROM users
+      WHERE status = 'active' AND expiry_time IS NOT NULL AND expiry_time <= ?
+    `).all(now);
+
+    if (expiredUsers.length > 0) {
+      db.transaction(() => {
+        const stmt = db.prepare("UPDATE users SET status = 'expired' WHERE uuid = ?");
+        for (const u of expiredUsers) {
+          stmt.run(u.uuid);
+        }
+      })();
+      for (const u of expiredUsers) {
+        pushUserEventToAllowedNodes(u.uuid, u.email, 'USER_DEL');
+        console.log(`[Expiry Check] User ${u.email} has expired. Access revoked.`);
+      }
+    }
+  } catch (err) {
+    console.error('[Expiry Check] Error:', err);
+  }
+}, 60 * 1000);

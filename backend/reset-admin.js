@@ -13,7 +13,7 @@ const adminToken = crypto.createHash('sha256').update(adminUuid).digest('hex');
 const adminCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin'").get().count;
 if (adminCount > 0) {
   // Update existing admin
-  db.prepare("UPDATE users SET password_hash = ?, need_password_change = 1, token = ? WHERE role = 'admin'").run(hash, adminToken);
+  db.prepare("UPDATE users SET password_hash = ?, need_password_change = 1 WHERE email = ?").run(hash, email);
   console.log(`[Admin Reset] Admin password successfully reset!`);
   console.log(`Email: ${email}`);
   console.log(`New Password: ${newPassword}`);
