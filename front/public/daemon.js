@@ -356,8 +356,22 @@ function connectWS() {
         console.log(`[WebSocket] Received USER_ADD for ${email}. Dynamically adding to ${inbounds?.length || 0} inbounds...`);
         for (const inb of (inbounds || [])) {
           try {
-            const flowArg = inb.flow ? `-flow="${inb.flow}"` : '';
-            await runCmd(`xray api proxyman inbound adduser -server=${XRAY_API_ADDRESS} -inbound="${inb.tag}" -email="${email}" -uuid="${uuid}" ${flowArg}`);
+            const tmpFile = `/tmp/xray-adu-${uuid}-${inb.tag}.json`;
+            const apiPayload = {
+              inboundTag: inb.tag,
+              user: {
+                email: email,
+                level: 0,
+                account: {
+                  "@type": "type.googleapis.com/xray.proxy.vless.Account",
+                  id: uuid,
+                  flow: inb.flow || ""
+                }
+              }
+            };
+            fs.writeFileSync(tmpFile, JSON.stringify(apiPayload));
+            await runCmd(`xray api adu -server=${XRAY_API_ADDRESS} ${tmpFile}`);
+            fs.unlinkSync(tmpFile);
             console.log(`[Xray API] Successfully added user ${email} to inbound ${inb.tag}`);
           } catch (e) {
             console.error(`[Xray API] Failed to add user ${email} to ${inb.tag}:`, e.message);
@@ -368,18 +382,12 @@ function connectWS() {
 
       } else if (payload.event === 'USER_DEL') {
         const { email, inbounds } = payload.data;
-        console.log(`[WebSocket] Received USER_DEL for ${email}. Dynamically removing from ${inbounds?.length || 0} inbounds...`);
-        for (const inb of (inbounds || [])) {
-          try {
-            await runCmd(`xray api proxyman inbound removeuser -server=${XRAY_API_ADDRESS} -inbound="${inb.tag}" -email="${email}"`);
-            console.log(`[Xray API] Successfully removed user ${email} from inbound ${inb.tag}`);
-          } catch (e) {
-            console.error(`[Xray API] Failed to remove user ${email} from ${inb.tag}:`, e.message);
-          }
-        }
+        console.log(`[WebSocket] Received USER_DEL for ${email}. Triggering sync and restart.`);
         // Report stats before losing the user's data completely
         await reportCycle();
-        ws.send(JSON.stringify({ type: 'sync_request', restart: false }));
+        // For deletion, to ensure clean state and since it is rare, we request a full sync with restart
+        ws.send(JSON.stringify({ type: 'sync_request', restart: true }));
+      }
 
       } else if (payload.event === 'FORCE_RELOAD') {
         console.log(`[WebSocket] Received FORCE_RELOAD. Triggering hard reload...`);
