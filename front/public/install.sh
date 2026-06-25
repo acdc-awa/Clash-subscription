@@ -42,15 +42,38 @@ echo "========================================================="
 echo " Starting Xray Daemon Agent Setup on Node: $NODE_ID"
 echo "========================================================="
 
+# 0. Check for historical version
+if [ -d "/etc/xray-daemon" ] || systemctl is-active --quiet xray-daemon; then
+  echo "[+] Detected existing historical installation. Uninstalling daemon first..."
+  systemctl stop xray-daemon 2>/dev/null || true
+  systemctl disable xray-daemon 2>/dev/null || true
+  rm -f /etc/systemd/system/xray-daemon.service
+  systemctl daemon-reload
+  rm -rf /etc/xray-daemon
+  echo "[+] Historical daemon uninstalled. Proceeding with fresh install."
+fi
+
 # 1. Update package list and install basic dependencies
-echo "[1/7] Installing basic dependencies (curl, unzip, fail2ban)..."
-if command -v apt-get &> /dev/null; then
-  apt-get update -y
-  apt-get install -y curl unzip fail2ban xz-utils
-elif command -v yum &> /dev/null; then
-  yum install -y curl unzip fail2ban xz
+echo "[1/7] Checking basic dependencies (curl, unzip, fail2ban, ufw, xz-utils)..."
+MISSING_PKGS=""
+if ! command -v curl &> /dev/null; then MISSING_PKGS="$MISSING_PKGS curl"; fi
+if ! command -v unzip &> /dev/null; then MISSING_PKGS="$MISSING_PKGS unzip"; fi
+if ! command -v fail2ban-server &> /dev/null; then MISSING_PKGS="$MISSING_PKGS fail2ban"; fi
+if ! command -v ufw &> /dev/null; then MISSING_PKGS="$MISSING_PKGS ufw"; fi
+if ! command -v xz &> /dev/null; then MISSING_PKGS="$MISSING_PKGS xz-utils"; fi
+
+if [ -n "$MISSING_PKGS" ]; then
+  echo "[+] Missing packages: $MISSING_PKGS. Installing now..."
+  if command -v apt-get &> /dev/null; then
+    apt-get update -y
+    apt-get install -y $MISSING_PKGS
+  elif command -v yum &> /dev/null; then
+    yum install -y $MISSING_PKGS
+  else
+    echo "[-] Warning: Unsupported package manager. Make sure these are installed manually: $MISSING_PKGS"
+  fi
 else
-  echo "[-] Warning: Unsupported package manager. Make sure curl, unzip, fail2ban are installed manually."
+  echo "[+] All basic dependencies are already installed. Skipping package update."
 fi
 
 # Start and enable fail2ban
@@ -176,6 +199,111 @@ echo "[+] Starting xray-daemon service..."
 systemctl daemon-reload
 systemctl enable xray-daemon
 systemctl restart xray-daemon
+
+# 8. Create Management Script (daemon.sh)
+echo "[8/8] Creating management script /etc/xray-daemon/daemon.sh..."
+cat <<'EOF' > /etc/xray-daemon/daemon.sh
+#!/bin/bash
+
+function show_menu() {
+    clear
+    echo "========================================================="
+    echo "             Xray Daemon 节点管理控制台"
+    echo "========================================================="
+    echo "  1. 查看运行状态 (Status)"
+    echo "  2. 启动服务 (Start)"
+    echo "  3. 停止服务 (Stop)"
+    echo "  4. 重启服务 (Restart)"
+    echo "  5. 完全卸载节点及代理面板 (Uninstall)"
+    echo "  0. 退出菜单 (Exit)"
+    echo "========================================================="
+    read -p "请输入序号 [0-5]: " choice
+
+    case $choice in
+        1)
+            systemctl status xray-daemon --no-pager
+            echo ""
+            systemctl status xray --no-pager
+            read -p "按回车键继续..."
+            show_menu
+            ;;
+        2)
+            echo "启动 Xray 及其守护进程..."
+            systemctl start xray
+            systemctl start xray-daemon
+            echo "已启动。"
+            read -p "按回车键继续..."
+            show_menu
+            ;;
+        3)
+            echo "停止 Xray 及其守护进程..."
+            systemctl stop xray-daemon
+            systemctl stop xray
+            echo "已停止。所有连接已断开。"
+            read -p "按回车键继续..."
+            show_menu
+            ;;
+        4)
+            echo "重启 Xray 及其守护进程..."
+            systemctl restart xray
+            systemctl restart xray-daemon
+            echo "已重启。新的配置和状态已经同步。"
+            read -p "按回车键继续..."
+            show_menu
+            ;;
+        5)
+            echo "警告: 这将彻底清除本节点上的 Daemon 守护进程和 Xray 服务！"
+            read -p "确认卸载? [y/N]: " confirm
+            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                echo "正在卸载..."
+                systemctl stop xray-daemon
+                systemctl disable xray-daemon
+                rm -f /etc/systemd/system/xray-daemon.service
+                systemctl daemon-reload
+                rm -rf /etc/xray-daemon
+                rm -f /usr/local/bin/daemon-xray
+                bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove --purge
+                echo "卸载彻底完成！该节点已与中控解除绑定并清理本地依赖。"
+                exit 0
+            else
+                echo "取消卸载。"
+                sleep 1
+                show_menu
+            fi
+            ;;
+        0)
+            exit 0
+            ;;
+        *)
+            echo "无效的输入，请重新选择！"
+            sleep 2
+            show_menu
+            ;;
+    esac
+}
+
+# If arguments are passed, use CLI mode, otherwise show interactive menu
+if [ -n "$1" ]; then
+    case "$1" in
+        stop) systemctl stop xray-daemon; systemctl stop xray ;;
+        start) systemctl start xray; systemctl start xray-daemon ;;
+        restart) systemctl restart xray; systemctl restart xray-daemon ;;
+        status) systemctl status xray-daemon --no-pager; systemctl status xray --no-pager ;;
+        uninstall)
+            systemctl stop xray-daemon; systemctl disable xray-daemon
+            rm -f /etc/systemd/system/xray-daemon.service; systemctl daemon-reload
+            rm -rf /etc/xray-daemon
+            rm -f /usr/local/bin/daemon-xray
+            bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove --purge
+            ;;
+        *) echo "Usage: $0 {start|stop|restart|status|uninstall} (or run without arguments for menu)" ;;
+    esac
+else
+    show_menu
+fi
+EOF
+chmod +x /etc/xray-daemon/daemon.sh
+ln -sf /etc/xray-daemon/daemon.sh /usr/local/bin/daemon-xray
 
 echo "========================================================="
 echo " Xray Daemon Setup Completed Successfully!"

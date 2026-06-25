@@ -13,18 +13,27 @@ const db = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 let JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+let JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+
+if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
+  if (!JWT_SECRET) JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  if (!JWT_REFRESH_SECRET) JWT_REFRESH_SECRET = crypto.randomBytes(32).toString('hex');
+  
   const envPath = path.join(__dirname, '.env');
   try {
     let envContent = '';
     try { envContent = fs.readFileSync(envPath, 'utf-8'); } catch {}
-    if (!envContent.includes('JWT_SECRET=')) {
-      fs.appendFileSync(envPath, `\nJWT_SECRET=${JWT_SECRET}\n`);
-      console.warn('[Security] JWT_SECRET 未配置，已自动生成并持久化到 .env 文件。');
+    
+    let toAppend = '';
+    if (!envContent.includes('JWT_SECRET=')) toAppend += `\nJWT_SECRET=${JWT_SECRET}\n`;
+    if (!envContent.includes('JWT_REFRESH_SECRET=')) toAppend += `\nJWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}\n`;
+    
+    if (toAppend) {
+      fs.appendFileSync(envPath, toAppend);
+      console.warn('[Security] JWT_SECRET/JWT_REFRESH_SECRET 未配置，已自动生成并持久化到 .env 文件。');
     }
   } catch (e) {
-    console.warn('[Security] JWT_SECRET 未配置，已自动生成（仅本次运行有效，无法写入 .env）。');
+    console.warn('[Security] JWT 密钥自动生成（仅本次运行有效，无法写入 .env）。');
   }
 }
 
@@ -48,21 +57,22 @@ function pushUserEventToAllowedNodes(userUuid, email, eventType) {
     for (const nodeId of nodeIds) {
       const ws = activeNodes.get(nodeId);
       if (ws && ws.readyState === WebSocket.OPEN) {
+        // Fetch inbound details for the user on this node
+        const inbounds = db.prepare(`
+          SELECT i.port, i.network, i.security FROM inbounds i
+          JOIN package_inbounds pi ON i.id = pi.inbound_id
+          JOIN users u ON u.package_id = pi.package_id
+          WHERE i.node_id = ? AND u.uuid = ?
+        `).all(nodeId, userUuid);
+        const inboundDetails = inbounds.map(inb => ({
+          tag: `${nodeId}_${inb.port}`,
+          flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : ''
+        }));
+
         if (eventType === 'USER_ADD') {
-          // 查询该节点上用户可访问的入站配置，包含 flow 信息
-          const inbounds = db.prepare(`
-            SELECT i.port, i.network, i.security FROM inbounds i
-            JOIN package_inbounds pi ON i.id = pi.inbound_id
-            JOIN users u ON u.package_id = pi.package_id
-            WHERE i.node_id = ? AND u.uuid = ?
-          `).all(nodeId, userUuid);
-          const inboundDetails = inbounds.map(inb => ({
-            tag: `${nodeId}_${inb.port}`,
-            flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : ''
-          }));
           ws.send(JSON.stringify({ event: 'USER_ADD', data: { email, uuid: userUuid, inbounds: inboundDetails } }));
         } else if (eventType === 'USER_DEL') {
-          ws.send(JSON.stringify({ event: 'USER_DEL', data: { email } }));
+          ws.send(JSON.stringify({ event: 'USER_DEL', data: { email, inbounds: inboundDetails } }));
         }
       }
     }
@@ -192,12 +202,22 @@ app.post('/api/auth/login', (req, res) => {
     const token = jwt.sign(
       { uuid: user.uuid, email: user.email, role: user.role },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '15m' }
     );
+
+    const refreshToken = jwt.sign(
+      { uuid: user.uuid },
+      JWT_REFRESH_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // Save refresh token to db
+    db.prepare('UPDATE users SET refresh_token = ? WHERE uuid = ?').run(refreshToken, user.uuid);
 
     res.json({
       success: true,
       token,
+      refreshToken,
       user: {
         uuid: user.uuid,
         email: user.email,
@@ -234,11 +254,46 @@ app.post('/api/auth/change-password', authenticate, (req, res) => {
     const salt = bcrypt.genSaltSync(10);
     const hash = bcrypt.hashSync(new_password, salt);
 
-    db.prepare('UPDATE users SET password_hash = ?, need_password_change = 0 WHERE uuid = ?')
+    db.prepare('UPDATE users SET password_hash = ?, need_password_change = 0, refresh_token = NULL WHERE uuid = ?')
       .run(hash, req.user.uuid);
 
     writeLog('CHANGE_PASSWORD', req.user.email, '修改了个人账户密码', req);
     res.json({ success: true, message: '密码修改成功' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(401).json({ error: '未提供 Refresh Token' });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+    const user = db.prepare('SELECT * FROM users WHERE uuid = ?').get(decoded.uuid);
+
+    if (!user || user.status !== 'active' || user.refresh_token !== refreshToken) {
+      return res.status(403).json({ error: '无效的 Refresh Token 或账户状态异常' });
+    }
+
+    const token = jwt.sign(
+      { uuid: user.uuid, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    res.json({ success: true, token });
+  } catch (err) {
+    res.status(403).json({ error: 'Refresh Token 已过期或无效' });
+  }
+});
+
+app.post('/api/auth/logout', authenticate, (req, res) => {
+  try {
+    db.prepare('UPDATE users SET refresh_token = NULL WHERE uuid = ?').run(req.user.uuid);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -312,6 +367,7 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
         server: r.server,
         secret: r.secret,
         multiplier: r.multiplier || 1.0,
+        advanced_config: r.advanced_config ? JSON.parse(r.advanced_config) : {},
         inbounds_count: inboundsCount,
         online: activeNodes.has(r.id),
         cpu_usage: stats ? stats.cpu_usage : 0,
@@ -329,7 +385,7 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
 
 app.post('/api/nodes', authenticate, requireAdmin, (req, res) => {
   try {
-    const { id, name, server, multiplier } = req.body;
+    const { id, name, server, multiplier, advanced_config } = req.body;
     if (!id || !name || !server) {
       return res.status(400).json({ error: '请填齐节点服务器基础信息' });
     }
@@ -340,9 +396,10 @@ app.post('/api/nodes', authenticate, requireAdmin, (req, res) => {
     // Generate random secret for the node connection
     const nodeSecret = crypto.randomBytes(16).toString('hex');
     const mult = multiplier !== undefined ? Number(multiplier) : 1.0;
+    const advConfStr = advanced_config ? JSON.stringify(advanced_config) : '{}';
 
-    db.prepare('INSERT INTO nodes (id, name, server, secret, multiplier) VALUES (?, ?, ?, ?, ?)')
-      .run(id, name, server, nodeSecret, mult);
+    db.prepare('INSERT INTO nodes (id, name, server, secret, multiplier, advanced_config) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, name, server, nodeSecret, mult, advConfStr);
 
     writeLog('CREATE_NODE', id, `新增服务器节点 ${name} (${id})，倍率 ${mult}`, req);
     res.status(201).json({ success: true, id, secret: nodeSecret });
@@ -354,7 +411,7 @@ app.post('/api/nodes', authenticate, requireAdmin, (req, res) => {
 app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
   try {
     const oldId = req.params.id;
-    const { id: newId, name, server, multiplier } = req.body;
+    const { id: newId, name, server, multiplier, advanced_config } = req.body;
     if (!newId || !name || !server) {
       return res.status(400).json({ error: '请填齐服务器信息' });
     }
@@ -368,10 +425,11 @@ app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
     }
 
     const mult = multiplier !== undefined ? Number(multiplier) : 1.0;
+    const advConfStr = advanced_config ? JSON.stringify(advanced_config) : '{}';
 
     db.transaction(() => {
-      db.prepare('UPDATE nodes SET id = ?, name = ?, server = ?, multiplier = ? WHERE id = ?')
-        .run(newId, name, server, mult, oldId);
+      db.prepare('UPDATE nodes SET id = ?, name = ?, server = ?, multiplier = ?, advanced_config = ? WHERE id = ?')
+        .run(newId, name, server, mult, advConfStr, oldId);
 
       // 修复 inbound 主键：node_id 通过级联更新了，但 id 前缀仍是旧 node_id
       if (newId !== oldId) {
@@ -603,6 +661,9 @@ app.post('/api/users', authenticate, requireAdmin, (req, res) => {
     writeLog('CREATE_USER', email, `新增用户 ${email} (${role})`, req);
     res.status(201).json({ success: true, uuid: userUuid });
   } catch (err) {
+    if (err.message.includes('UNIQUE constraint failed: users.email')) {
+      return res.status(400).json({ error: '该邮箱地址已被注册，请更换！' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -695,9 +756,12 @@ app.put('/api/users/:uuid', authenticate, requireAdmin, (req, res) => {
       }
     }
 
-    writeLog('UPDATE_USER', email || oldUser.email, `更新了用户 ${email || oldUser.email} 的属性`, req);
+    writeLog('UPDATE_USER', email || oldUser.email, `更新用户资料`, req);
     res.json({ success: true, uuid: userUuid });
   } catch (err) {
+    if (err.message.includes('UNIQUE constraint failed: users.email')) {
+      return res.status(400).json({ error: '该邮箱地址已被注册，请更换！' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -1399,7 +1463,13 @@ wss.on('connection', (ws, request) => {
           })();
         }
       } else if (payload.type === 'sync_request') {
-        // Send down node configuration template and active user lists
+        // Fetch node advanced config
+        const nodeRecord = db.prepare('SELECT advanced_config FROM nodes WHERE id = ?').get(nodeId);
+        let advConfig = {};
+        if (nodeRecord && nodeRecord.advanced_config) {
+          try { advConfig = JSON.parse(nodeRecord.advanced_config); } catch {}
+        }
+
         const inbounds = db.prepare('SELECT * FROM inbounds WHERE node_id = ?').all(nodeId);
         
         // Render Xray config.json compatible structure
@@ -1462,10 +1532,70 @@ wss.on('connection', (ws, request) => {
           return xrayInb;
         });
 
+        // Add API inbound for daemon communication
+        const apiInbound = {
+          listen: "127.0.0.1",
+          port: 10085,
+          protocol: "dokodemo-door",
+          settings: { address: "127.0.0.1" },
+          tag: "api-in"
+        };
+
+        const fullConfig = {
+          log: { loglevel: "warning" },
+          api: {
+            tag: "api",
+            services: ["HandlerService", "StatsService"]
+          },
+          stats: {},
+          policy: {
+            levels: { "0": { statsUserUplink: true, statsUserDownlink: true } },
+            system: { statsInboundUplink: true, statsInboundDownlink: true }
+          },
+          inbounds: [...xrayInbounds, apiInbound],
+          outbounds: [
+            { protocol: "freedom", tag: "direct" },
+            { protocol: "blackhole", tag: "blocked" }
+          ],
+          routing: {
+            rules: [
+              { inboundTag: ["api-in"], outboundTag: "api", type: "field" }
+            ]
+          }
+        };
+
+        // Apply advanced configurations
+        if (advConfig.enable_sniffing) {
+          fullConfig.inbounds.forEach(inb => {
+            if (inb.tag !== "api-in") {
+              inb.sniffing = {
+                enabled: true,
+                destOverride: ["http", "tls", "quic", "fakedns"]
+              };
+            }
+          });
+        }
+        if (advConfig.block_bittorrent) {
+          fullConfig.routing.rules.push({
+            protocol: ["bittorrent"],
+            outboundTag: "blocked",
+            type: "field"
+          });
+        }
+        if (advConfig.block_private) {
+          fullConfig.routing.rules.push({
+            ip: ["geoip:private"],
+            outboundTag: "blocked",
+            type: "field"
+          });
+        }
+
         ws.send(JSON.stringify({
           event: 'SYNC_RESPONSE',
           data: {
-            inbounds: xrayInbounds
+            inbounds: xrayInbounds, // For daemon UFW processing
+            config: fullConfig,     // Complete ready-to-write JSON config
+            restart: payload.restart !== false // default to true if not strictly false
           }
         }));
       }
@@ -1533,5 +1663,39 @@ setInterval(() => {
     }
   } catch (err) {
     console.error('[Expiry Check] Error:', err);
+  }
+}, 60 * 1000);
+
+// ------------------------------------------------------------
+// Scheduled Restart Cron
+// ------------------------------------------------------------
+setInterval(() => {
+  try {
+    const now = new Date();
+    // Use local time for standard hour:minute comparison
+    const currentHourStr = now.getHours().toString().padStart(2, '0');
+    const currentMinStr = now.getMinutes().toString().padStart(2, '0');
+    const timeStr = `${currentHourStr}:${currentMinStr}`;
+
+    const nodes = db.prepare('SELECT id, advanced_config FROM nodes').all();
+    for (const node of nodes) {
+      if (!activeNodes.has(node.id)) continue;
+
+      let advConfig = {};
+      if (node.advanced_config) {
+        try { advConfig = JSON.parse(node.advanced_config); } catch {}
+      }
+
+      const restartTime = advConfig.restart_time || "04:00";
+      if (timeStr === restartTime) {
+        console.log(`[Cron] Triggering daily RESTART_XRAY for node ${node.id} at ${timeStr}`);
+        const ws = activeNodes.get(node.id);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ event: 'RESTART_XRAY' }));
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Cron] Error checking scheduled restarts:', err);
   }
 }, 60 * 1000);

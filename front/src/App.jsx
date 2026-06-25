@@ -88,7 +88,32 @@ async function apiFetch(method, urlPath, body = null) {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(urlPath, options);
+  let response = await fetch(urlPath, options);
+
+  if (response.status === 401 && localStorage.getItem('clash_refresh_token') && urlPath !== '/api/auth/refresh') {
+    try {
+      const refreshResp = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: localStorage.getItem('clash_refresh_token') })
+      });
+      
+      if (refreshResp.ok) {
+        const refreshData = await refreshResp.json();
+        localStorage.setItem('clash_token', refreshData.token);
+        headers['Authorization'] = `Bearer ${refreshData.token}`;
+        options.headers = headers;
+        response = await fetch(urlPath, options); // Retry original request
+      } else {
+        throw new Error('Refresh failed');
+      }
+    } catch (err) {
+      localStorage.clear();
+      window.location.href = '/login';
+      throw new Error('会话已过期，请重新登录');
+    }
+  }
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.error || `请求失败 (${response.status})`);
@@ -145,9 +170,11 @@ function Login() {
         // Intercept and force password modification
         setTempToken(data.token);
         localStorage.setItem('clash_token', data.token); // Save temporarily to authorize password change
+        if (data.refreshToken) localStorage.setItem('clash_refresh_token', data.refreshToken);
         setForceChangePwd(true);
       } else {
         localStorage.setItem('clash_token', data.token);
+        if (data.refreshToken) localStorage.setItem('clash_refresh_token', data.refreshToken);
         localStorage.setItem('clash_role', data.user.role);
         localStorage.setItem('clash_email', data.user.email);
         localStorage.setItem('clash_uuid', data.user.uuid);
@@ -270,6 +297,12 @@ function UserDashboard() {
   const [nodes, setNodes] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Change Password State
+  const [showChangePwd, setShowChangePwd] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
   const fetchUserData = async () => {
     try {
       const [profData, nodesData] = await Promise.all([
@@ -295,10 +328,27 @@ function UserDashboard() {
     fetchUserData();
   }, [token]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await apiFetch('POST', '/api/auth/logout');
+    } catch (e) {}
     localStorage.clear();
     showToast('已退出登录', 'info');
     navigate('/login', { replace: true });
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) return showToast('两次密码输入不一致', 'error');
+    if (newPassword.length < 6) return showToast('新密码至少6位', 'error');
+
+    try {
+      await apiFetch('POST', '/api/auth/change-password', { old_password: oldPassword, new_password: newPassword });
+      showToast('密码修改成功，请重新登录', 'success');
+      handleLogout();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
   };
 
   const copySubLink = () => {
@@ -327,9 +377,40 @@ function UserDashboard() {
           {profile?.role === 'admin' && (
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin')}>⚙️ 后台管理</button>
           )}
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>退出</button>
         </div>
       </header>
+
+      {/* Change Password Modal */}
+      {showChangePwd && (
+        <div className="modal-overlay">
+          <div className="modal-content glass" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3>修改密码</h3>
+              <button className="btn-icon" onClick={() => setShowChangePwd(false)}>✕</button>
+            </div>
+            <form onSubmit={handleChangePassword}>
+              <div className="form-group">
+                <label>旧密码</label>
+                <input type="password" required value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>新密码</label>
+                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>确认新密码</label>
+                <input type="password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+              </div>
+              <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowChangePwd(false)}>取消</button>
+                <button type="submit" className="btn btn-primary">确认修改</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <main className="dashboard-content">
         {/* Row 1: Profile & Traffic Card */}
@@ -544,10 +625,32 @@ function AdminDashboard() {
     setSelectedNodeForInbounds(null); // Reset when tab changes
   }, [activeTab]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await apiFetch('POST', '/api/auth/logout');
+    } catch (e) {}
     localStorage.clear();
     showToast('已退出登录', 'info');
     navigate('/login', { replace: true });
+  };
+
+  const [showChangePwd, setShowChangePwd] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) return showToast('两次密码输入不一致', 'error');
+    if (newPassword.length < 6) return showToast('新密码至少6位', 'error');
+
+    try {
+      await apiFetch('POST', '/api/auth/change-password', { old_password: oldPassword, new_password: newPassword });
+      showToast('密码修改成功，请重新登录', 'success');
+      handleLogout();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
   };
 
   // --------------------------------------------------------
@@ -627,7 +730,13 @@ function AdminDashboard() {
         id: '',
         name: '',
         server: '',
-        multiplier: 1.0
+        multiplier: 1.0,
+        advanced_config: {
+          enable_sniffing: false,
+          block_bittorrent: false,
+          block_private: false,
+          restart_time: "04:00"
+        }
       });
     }
     setNodeModalOpen(true);
@@ -924,9 +1033,40 @@ function AdminDashboard() {
         <div className="brand">⚙️ Clash 订阅中控端后台</div>
         <div className="user-actions">
           <span className="email-badge admin-badge">管理员: {localStorage.getItem('clash_email')}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>退出</button>
         </div>
       </header>
+
+      {/* Admin Change Password Modal */}
+      {showChangePwd && (
+        <div className="modal-overlay">
+          <div className="modal-content glass" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3>修改管理员密码</h3>
+              <button className="btn-icon" onClick={() => setShowChangePwd(false)}>✕</button>
+            </div>
+            <form onSubmit={handleChangePassword}>
+              <div className="form-group">
+                <label>旧密码</label>
+                <input type="password" required value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>新密码</label>
+                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>确认新密码</label>
+                <input type="password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+              </div>
+              <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowChangePwd(false)}>取消</button>
+                <button type="submit" className="btn btn-primary">确认修改</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Admin Nav Tabs */}
       <nav className="admin-tabs glass">
@@ -1473,6 +1613,59 @@ function AdminDashboard() {
                     onChange={(e) => setCurrentNode({ ...currentNode, multiplier: Number(e.target.value) })} 
                     placeholder="1.0"
                     required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
+                <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: '#94a3b8' }}>Xray 底层全局控制 (Xray Advanced Config)</h4>
+                
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: '8px' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={currentNode.advanced_config?.enable_sniffing || false}
+                    onChange={(e) => setCurrentNode({ 
+                      ...currentNode, 
+                      advanced_config: { ...currentNode.advanced_config, enable_sniffing: e.target.checked }
+                    })} 
+                  />
+                  <span style={{color: '#e2e8f0'}}>开启全协议流量嗅探 (Enable Sniffing: HTTP/TLS/QUIC)</span>
+                </label>
+                
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: '8px' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={currentNode.advanced_config?.block_bittorrent || false}
+                    onChange={(e) => setCurrentNode({ 
+                      ...currentNode, 
+                      advanced_config: { ...currentNode.advanced_config, block_bittorrent: e.target.checked }
+                    })} 
+                  />
+                  <span style={{color: '#e2e8f0'}}>强制拦截 BT 下载 (Block BitTorrent)</span>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={currentNode.advanced_config?.block_private || false}
+                    onChange={(e) => setCurrentNode({ 
+                      ...currentNode, 
+                      advanced_config: { ...currentNode.advanced_config, block_private: e.target.checked }
+                    })} 
+                  />
+                  <span style={{color: '#e2e8f0'}}>屏蔽局域网 IP (Block Private LAN / geoip:private)</span>
+                </label>
+
+                <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ color: '#e2e8f0', fontSize: '0.9rem' }}>每日自动固化配置与重载时间:</label>
+                  <input 
+                    type="time" 
+                    value={currentNode.advanced_config?.restart_time || "04:00"}
+                    onChange={(e) => setCurrentNode({ 
+                      ...currentNode, 
+                      advanced_config: { ...currentNode.advanced_config, restart_time: e.target.value }
+                    })} 
+                    style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', padding: '4px 8px', borderRadius: '4px' }}
                   />
                 </div>
               </div>

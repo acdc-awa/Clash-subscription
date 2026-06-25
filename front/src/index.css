@@ -6,40 +6,47 @@
 }
 
 :root {
-  --bg-dark: #070713;
-  --bg-card: rgba(255, 255, 255, 0.03);
-  --bg-card-hover: rgba(255, 255, 255, 0.06);
-  --border-color: rgba(255, 255, 255, 0.08);
-  --border-focus: rgba(124, 108, 240, 0.6);
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
+  --bg-dark: #0a0a0f;
+  --bg-card: rgba(15, 15, 25, 0.4);
+  --bg-card-hover: rgba(25, 25, 35, 0.6);
+  --border-color: rgba(255, 255, 255, 0.06);
+  --border-focus: rgba(139, 92, 246, 0.6);
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
   --text-dim: #64748b;
-  --accent: #6366f1;
-  --accent-glow: rgba(99, 102, 241, 0.35);
-  --accent-hover: #818cf8;
+  --accent: #8b5cf6;
+  --accent-glow: rgba(139, 92, 246, 0.4);
+  --accent-hover: #a78bfa;
   --success: #10b981;
-  --success-bg: rgba(16, 185, 129, 0.12);
+  --success-bg: rgba(16, 185, 129, 0.15);
   --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.12);
+  --warning-bg: rgba(245, 158, 11, 0.15);
   --danger: #ef4444;
-  --danger-bg: rgba(239, 68, 68, 0.12);
+  --danger-bg: rgba(239, 68, 68, 0.15);
   --info: #3b82f6;
   
   --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 20px;
-  --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  --shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Outfit', var(--font-sans);
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
 html, body {
   width: 100%;
   height: 100%;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   background-color: var(--bg-dark);
   color: var(--text-primary);
   overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6, .brand {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 /* Background Glowing Effects */
@@ -61,27 +68,37 @@ body::before {
 /* ====== Layout & Containers ====== */
 .glass {
   background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow);
 }
 
 .glass-card {
   background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 1.5rem;
+  padding: 1.8rem;
   transition: var(--transition);
   box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
 }
 
 .glass-card:hover {
   background: var(--bg-card-hover);
-  border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-4px);
+  box-shadow: 0 15px 40px -10px rgba(0, 0, 0, 0.8), 0 0 20px rgba(139, 92, 246, 0.1);
 }
 
 /* ====== Common Form Elements ====== */
@@ -141,15 +158,31 @@ button, .btn {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), #4f46e5);
+  background: linear-gradient(135deg, var(--accent), #6366f1);
   color: #ffffff;
   box-shadow: 0 4px 15px var(--accent-glow);
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%; width: 50%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  transition: var(--transition);
+  z-index: -1;
+}
+
+.btn-primary:hover::after {
+  left: 100%;
+  transition: left 0.5s ease-out;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, var(--accent-hover), var(--accent));
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(139, 92, 246, 0.5);
 }
 
 .btn-success {

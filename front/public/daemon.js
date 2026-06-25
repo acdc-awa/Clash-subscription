@@ -188,31 +188,25 @@ async function applyUfwRules(newPorts) {
 // Xray Configuration Renderer
 // ------------------------------------------------------------
 
-function renderXrayConfig(inbounds) {
-  // Wrap incoming proxy inbounds with API and routing layers
+function renderXrayConfig(inbounds, configObj) {
+  // If the backend provided a complete config, just write it
+  if (configObj) {
+    fs.writeFileSync(XRAY_CONFIG_PATH, JSON.stringify(configObj, null, 2), 'utf8');
+    console.log(`[Config] Successfully wrote complete Xray config to ${XRAY_CONFIG_PATH}`);
+    return;
+  }
+
+  // Fallback for older versions
   const fullConfig = {
-    log: {
-      loglevel: "warning"
-    },
+    log: { loglevel: "warning" },
     api: {
       tag: "api",
-      services: [
-        "HandlerService",
-        "StatsService"
-      ]
+      services: ["HandlerService", "StatsService"]
     },
     stats: {},
     policy: {
-      levels: {
-        "0": {
-          "statsUserUplink": true,
-          "statsUserDownlink": true
-        }
-      },
-      system: {
-        "statsInboundUplink": true,
-        "statsInboundDownlink": true
-      }
+      levels: { "0": { statsUserUplink: true, statsUserDownlink: true } },
+      system: { statsInboundUplink: true, statsInboundDownlink: true }
     },
     inbounds: [
       ...inbounds,
@@ -220,40 +214,24 @@ function renderXrayConfig(inbounds) {
         listen: "127.0.0.1",
         port: 10085,
         protocol: "dokodemo-door",
-        settings: {
-          address: "127.0.0.1"
-        },
+        settings: { address: "127.0.0.1" },
         tag: "api-in"
       }
     ],
     outbounds: [
-      {
-        protocol: "freedom",
-        tag: "direct"
-      },
-      {
-        protocol: "blackhole",
-        tag: "blocked"
-      }
+      { protocol: "freedom", tag: "direct" },
+      { protocol: "blackhole", tag: "blocked" }
     ],
     routing: {
       rules: [
-        {
-          inboundTag: ["api-in"],
-          outboundTag: "api",
-          type: "field"
-        },
-        {
-          outboundTag: "blocked",
-          ip: ["geoip:private"],
-          type: "field"
-        }
+        { inboundTag: ["api-in"], outboundTag: "api", type: "field" },
+        { outboundTag: "blocked", ip: ["geoip:private"], type: "field" }
       ]
     }
   };
 
   fs.writeFileSync(XRAY_CONFIG_PATH, JSON.stringify(fullConfig, null, 2), 'utf8');
-  console.log(`[Config] Successfully wrote Xray config to ${XRAY_CONFIG_PATH}`);
+  console.log(`[Config] Successfully wrote legacy Xray config to ${XRAY_CONFIG_PATH}`);
 }
 
 async function restartXray() {
@@ -365,15 +343,51 @@ function connectWS() {
         const ports = inbounds.map(inb => inb.port);
         await applyUfwRules(ports);
         
-        // Write config and restart Xray
-        renderXrayConfig(inbounds);
-        await restartXray();
-      } else if (payload.event === 'FORCE_RELOAD' || payload.event === 'USER_ADD' || payload.event === 'USER_DEL') {
-        console.log(`[WebSocket] Received event [${payload.event}]. Triggering reload...`);
-        // Report latest stats first to prevent count loss
+        // Write config
+        renderXrayConfig(inbounds, payload.data.config);
+        
+        if (payload.data.restart) {
+          await restartXray();
+        } else {
+          console.log(`[Config] Skipped restart as requested by backend (silent sync).`);
+        }
+      } else if (payload.event === 'USER_ADD') {
+        const { email, uuid, inbounds } = payload.data;
+        console.log(`[WebSocket] Received USER_ADD for ${email}. Dynamically adding to ${inbounds?.length || 0} inbounds...`);
+        for (const inb of (inbounds || [])) {
+          try {
+            const flowArg = inb.flow ? `-flow="${inb.flow}"` : '';
+            await runCmd(`xray api proxyman inbound adduser -server=${XRAY_API_ADDRESS} -inbound="${inb.tag}" -email="${email}" -uuid="${uuid}" ${flowArg}`);
+            console.log(`[Xray API] Successfully added user ${email} to inbound ${inb.tag}`);
+          } catch (e) {
+            console.error(`[Xray API] Failed to add user ${email} to ${inb.tag}:`, e.message);
+          }
+        }
+        // Request silent configuration sync to persist changes
+        ws.send(JSON.stringify({ type: 'sync_request', restart: false }));
+
+      } else if (payload.event === 'USER_DEL') {
+        const { email, inbounds } = payload.data;
+        console.log(`[WebSocket] Received USER_DEL for ${email}. Dynamically removing from ${inbounds?.length || 0} inbounds...`);
+        for (const inb of (inbounds || [])) {
+          try {
+            await runCmd(`xray api proxyman inbound removeuser -server=${XRAY_API_ADDRESS} -inbound="${inb.tag}" -email="${email}"`);
+            console.log(`[Xray API] Successfully removed user ${email} from inbound ${inb.tag}`);
+          } catch (e) {
+            console.error(`[Xray API] Failed to remove user ${email} from ${inb.tag}:`, e.message);
+          }
+        }
+        // Report stats before losing the user's data completely
         await reportCycle();
-        // Request fresh configuration
-        ws.send(JSON.stringify({ type: 'sync_request' }));
+        ws.send(JSON.stringify({ type: 'sync_request', restart: false }));
+
+      } else if (payload.event === 'FORCE_RELOAD') {
+        console.log(`[WebSocket] Received FORCE_RELOAD. Triggering hard reload...`);
+        await reportCycle();
+        ws.send(JSON.stringify({ type: 'sync_request', restart: true }));
+      } else if (payload.event === 'RESTART_XRAY') {
+        console.log(`[WebSocket] Received RESTART_XRAY. Executing restart...`);
+        await restartXray();
       }
     } catch (e) {
       console.error("[-] Failed to process WS message:", e.message);

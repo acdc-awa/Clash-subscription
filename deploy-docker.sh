@@ -31,6 +31,7 @@ fi
 # 3. Build & Run
 echo "正在使用 Docker Compose 构建并启动主控服务..."
 cd backend
+touch .env
 docker compose up -d --build
 
 echo "================================================="

@@ -21,7 +21,8 @@ db.exec(`
     name TEXT NOT NULL,
     server TEXT NOT NULL,
     secret TEXT NOT NULL,
-    multiplier REAL DEFAULT 1.0
+    multiplier REAL DEFAULT 1.0,
+    advanced_config TEXT DEFAULT '{}'
   );
 
   CREATE TABLE IF NOT EXISTS inbounds (
@@ -57,6 +58,7 @@ db.exec(`
     status TEXT DEFAULT 'active',
     need_password_change INTEGER DEFAULT 1,
     token TEXT UNIQUE NOT NULL,
+    refresh_token TEXT,
     FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL
   );
 
@@ -121,6 +123,32 @@ try {
   }
 } catch (err) {
   console.error("❌ [Database Migration] Failed to migrate package_nodes to package_inbounds:", err);
+}
+
+// Migration: Add refresh_token to users table if missing
+try {
+  const tableInfo = db.pragma("table_info(users)");
+  const hasRefreshToken = tableInfo.some(col => col.name === 'refresh_token');
+  if (!hasRefreshToken) {
+    console.log("[Database Migration] Adding refresh_token column to users table...");
+    db.exec("ALTER TABLE users ADD COLUMN refresh_token TEXT");
+    console.log("✅ [Database Migration] Successfully added refresh_token column.");
+  }
+} catch (err) {
+  console.error("❌ [Database Migration] Failed to add refresh_token column:", err);
+}
+
+// Migration: Add advanced_config to nodes table if missing
+try {
+  const tableInfo = db.pragma("table_info(nodes)");
+  const hasAdvancedConfig = tableInfo.some(col => col.name === 'advanced_config');
+  if (!hasAdvancedConfig) {
+    console.log("[Database Migration] Adding advanced_config column to nodes table...");
+    db.exec("ALTER TABLE nodes ADD COLUMN advanced_config TEXT DEFAULT '{}'");
+    console.log("✅ [Database Migration] Successfully added advanced_config column.");
+  }
+} catch (err) {
+  console.error("❌ [Database Migration] Failed to add advanced_config column:", err);
 }
 
 // Insert default rule "default" if not exists
