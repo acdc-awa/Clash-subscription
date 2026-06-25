@@ -387,8 +387,6 @@ function connectWS() {
         await reportCycle();
         // For deletion, to ensure clean state and since it is rare, we request a full sync with restart
         ws.send(JSON.stringify({ type: 'sync_request', restart: true }));
-      }
-
       } else if (payload.event === 'FORCE_RELOAD') {
         console.log(`[WebSocket] Received FORCE_RELOAD. Triggering hard reload...`);
         await reportCycle();
