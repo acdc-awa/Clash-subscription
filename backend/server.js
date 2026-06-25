@@ -687,7 +687,8 @@ app.post('/api/users', authenticate, requireAdmin, (req, res) => {
 app.put('/api/users/:uuid', authenticate, requireAdmin, (req, res) => {
   try {
     const userUuid = req.params.uuid;
-    const { email, password, role, package_id, expiry_time, activation_time, status } = req.body;
+    const { email, password, role, package_id, expiry_time, activation_time, status, used_traffic } = req.body;
+
 
     const oldUser = db.prepare('SELECT email, status, package_id, expiry_time, activation_time FROM users WHERE uuid = ?').get(userUuid);
     if (!oldUser) return res.status(404).json({ error: '用户不存在' });
@@ -728,11 +729,21 @@ app.put('/api/users/:uuid', authenticate, requireAdmin, (req, res) => {
       if (password) {
         const salt = bcrypt.genSaltSync(10);
         const hash = bcrypt.hashSync(password, salt);
-        db.prepare('UPDATE users SET email = ?, password_hash = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ?, need_password_change = 0 WHERE uuid = ?')
-          .run(email, hash, role, package_id || null, finalExpiry, finalActivation, status || 'active', userUuid);
+        if (used_traffic !== undefined) {
+          db.prepare('UPDATE users SET email = ?, password_hash = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ?, need_password_change = 0, used_traffic = ? WHERE uuid = ?')
+            .run(email, hash, role, package_id || null, finalExpiry, finalActivation, status || 'active', used_traffic, userUuid);
+        } else {
+          db.prepare('UPDATE users SET email = ?, password_hash = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ?, need_password_change = 0 WHERE uuid = ?')
+            .run(email, hash, role, package_id || null, finalExpiry, finalActivation, status || 'active', userUuid);
+        }
       } else {
-        db.prepare('UPDATE users SET email = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ? WHERE uuid = ?')
-          .run(email, role, package_id || null, finalExpiry, finalActivation, status || 'active', userUuid);
+        if (used_traffic !== undefined) {
+          db.prepare('UPDATE users SET email = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ?, used_traffic = ? WHERE uuid = ?')
+            .run(email, role, package_id || null, finalExpiry, finalActivation, status || 'active', used_traffic, userUuid);
+        } else {
+          db.prepare('UPDATE users SET email = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ? WHERE uuid = ?')
+            .run(email, role, package_id || null, finalExpiry, finalActivation, status || 'active', userUuid);
+        }
       }
     })();
 
