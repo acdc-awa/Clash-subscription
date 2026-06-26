@@ -101,6 +101,16 @@ db.exec(`
     FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE ON UPDATE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS node_sync_logs (
+    id TEXT PRIMARY KEY,
+    node_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL,
+    message TEXT,
+    timestamp INTEGER NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE ON UPDATE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS logs (
     id TEXT PRIMARY KEY,
     time TEXT NOT NULL,

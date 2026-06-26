@@ -393,6 +393,7 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
     const nodes = rows.map(r => {
       const stats = db.prepare('SELECT cpu_usage, mem_usage, disk_usage, uptime, os_type, online_users, network_rx, network_tx FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(r.id);
       const inboundsCount = db.prepare('SELECT COUNT(*) as count FROM inbounds WHERE node_id = ?').get(r.id).count;
+      const lastSync = db.prepare('SELECT status, timestamp, message FROM node_sync_logs WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(r.id);
 
       return {
         id: r.id,
@@ -412,10 +413,20 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
         os_type: stats ? stats.os_type : 'Linux',
         online_users: stats ? stats.online_users : 0,
         network_rx: stats ? stats.network_rx : 0,
-        network_tx: stats ? stats.network_tx : 0
+        network_tx: stats ? stats.network_tx : 0,
+        last_sync: lastSync ? { status: lastSync.status, timestamp: lastSync.timestamp, message: lastSync.message } : null
       };
     });
     res.json(nodes);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/nodes/:id/logs', authenticate, requireAdmin, (req, res) => {
+  try {
+    const logs = db.prepare('SELECT * FROM node_sync_logs WHERE node_id = ? ORDER BY timestamp DESC LIMIT 50').all(req.params.id);
+    res.json(logs);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1654,6 +1665,23 @@ wss.on('connection', (ws, request) => {
   ws.on('message', (message) => {
     try {
       const payload = JSON.parse(message);
+      
+      if (payload.type === 'sync_ack') {
+        const ackId = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        db.prepare(`
+          INSERT INTO node_sync_logs (id, node_id, action, status, message, timestamp)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          ackId, 
+          nodeId, 
+          payload.action || 'unknown', 
+          payload.status || 'unknown', 
+          payload.message || '', 
+          payload.timestamp || Math.floor(Date.now() / 1000)
+        );
+        console.log(`[WebSocket] Received sync_ack from node ${nodeId} for action ${payload.action}: ${payload.status}`);
+        return;
+      }
       
       if (payload.type === 'report') {
         const { system_stats, user_traffic } = payload;

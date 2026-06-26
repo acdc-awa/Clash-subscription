@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff, Database, Download, Upload } from 'lucide-react';
+import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff, Database, Download, Upload, Terminal } from 'lucide-react';
 import './App.css';
 
 // ------------------------------------------------------------
@@ -486,6 +486,11 @@ function NodeCard({ node, formatTraffic, actions }) {
               </span>
               <span>• {node.os_type || 'Linux'}</span>
               <span>• Uptime: {Math.floor((node.uptime || 0) / 86400)}d</span>
+              {node.last_sync && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: node.last_sync.status === 'success' ? '#10b981' : '#ef4444', marginLeft: 'auto', background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px' }}>
+                  {node.last_sync.status === 'success' ? '✅' : '❌'} {new Date(node.last_sync.timestamp * 1000).toLocaleTimeString('zh-CN')}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -792,6 +797,8 @@ function AdminDashboard() {
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [currentNode, setCurrentNode] = useState(null);
   const [nodeModalOpen, setNodeModalOpen] = useState(false);
+  const [nodeLogsModalOpen, setNodeLogsModalOpen] = useState(false);
+  const [currentNodeLogs, setCurrentNodeLogs] = useState([]);
   const [currentPackage, setCurrentPackage] = useState(null);
   const [pkgModalOpen, setPkgModalOpen] = useState(false);
   const [reportIntervalModalOpen, setReportIntervalModalOpen] = useState(false);
@@ -958,6 +965,17 @@ function AdminDashboard() {
   // --------------------------------------------------------
   // Node Actions
   // --------------------------------------------------------
+  const handleOpenNodeLogsModal = async (node) => {
+    setCurrentNode(node);
+    try {
+      const data = await apiFetch('GET', `/api/nodes/${node.id}/logs`);
+      setCurrentNodeLogs(data);
+      setNodeLogsModalOpen(true);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const handleOpenNodeModal = (node = null) => {
     if (node) {
       setCurrentNode({ ...node });
@@ -1547,6 +1565,7 @@ function AdminDashboard() {
                               navigator.clipboard.writeText(installCmd);
                               showToast('一键部署命令已复制', 'success');
                             }}><ClipboardCopy size={16} /></button>
+                            <button className="btn-icon" title="查看推送日志" onClick={() => handleOpenNodeLogsModal(n)}><Terminal size={16} /></button>
                             <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}><Edit2 size={16} /></button>
                             <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}><Trash2 size={16} /></button>
                           </>
@@ -1845,6 +1864,40 @@ function AdminDashboard() {
         )}
 
       </main>
+
+      {/* ========================================================
+          NODE LOGS MODAL
+      ======================================================== */}
+      {nodeLogsModalOpen && currentNode && (
+        <div className="modal-overlay">
+          <div className="modal-content glass" style={{ maxWidth: '800px', width: '90%' }}>
+            <div className="modal-header">
+              <h3>节点推送日志: {currentNode.name}</h3>
+              <button className="btn-icon" onClick={() => setNodeLogsModalOpen(false)}>×</button>
+            </div>
+            <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+              {currentNodeLogs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-dim)' }}>暂无推送日志记录。</div>
+              ) : (
+                <div style={{ background: '#1e1e1e', color: '#d4d4d4', fontFamily: 'monospace', padding: '1rem', borderRadius: '8px', fontSize: '0.85rem' }}>
+                  {currentNodeLogs.map((log, index) => (
+                    <div key={log.id || index} style={{ marginBottom: '0.5rem', borderBottom: '1px solid #333', paddingBottom: '0.5rem' }}>
+                      <span style={{ color: '#569cd6' }}>[{new Date(log.timestamp * 1000).toLocaleString('zh-CN')}]</span>{' '}
+                      <span style={{ color: '#4ec9b0' }}>{log.action}</span>{' '}
+                      <span style={{ color: log.status === 'success' ? '#10b981' : '#ef4444', fontWeight: 'bold' }}>[{log.status.toUpperCase()}]</span>{' '}
+                      <span style={{ color: '#ce9178' }}>{log.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={() => setNodeLogsModalOpen(false)}>关闭</button>
+              <button type="button" className="btn btn-primary" onClick={() => handleOpenNodeLogsModal(currentNode)}>刷新</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================
           USER MODAL
