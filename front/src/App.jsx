@@ -1309,6 +1309,7 @@ function AdminDashboard() {
           <button className={activeTab === 'packages' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('packages'); setMobileMenuOpen(false); }}>套餐定义</button>
           <button className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('logs'); setMobileMenuOpen(false); }}>安全审计</button>
           <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('rules'); setMobileMenuOpen(false); }}>规则模板</button>
+          <button className={activeTab === 'maintenance' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('maintenance'); setMobileMenuOpen(false); }}>数据维护</button>
         </nav>
         <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', opacity: 0.8, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '34px', boxSizing: 'border-box' }}>{localStorage.getItem('clash_email')}</span>
@@ -1742,6 +1743,103 @@ function AdminDashboard() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 7: MAINTENANCE */}
+        {activeTab === 'maintenance' && (
+          <div className="maintenance-tab">
+            <div className="action-row">
+              <h3>数据维护与安全</h3>
+            </div>
+            
+            <div className="card glass" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
+              <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--primary)' }}>
+                <Database size={20} /> 备份当前数据
+              </h4>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                该操作将下载当前系统所有数据（节点、用户、订阅配置等）的 SQLite 数据库文件。
+                导出的文件将携带系统专属时间戳及防伪签名，用于在未来的灾难恢复或系统迁移时验证备份合法性。
+              </p>
+              <button className="btn btn-primary" onClick={async () => {
+                const token = localStorage.getItem('clash_admin_token');
+                if (!token) return toast.error("未找到有效的管理员令牌");
+                try {
+                  const res = await fetch('/api/system/backup', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                  });
+                  if (!res.ok) {
+                    const err = await res.json().catch(()=>({}));
+                    throw new Error(err.error || '导出失败');
+                  }
+                  const blob = await res.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  const disposition = res.headers.get('Content-Disposition');
+                  let filename = 'clash_backup.db';
+                  if (disposition && disposition.includes('filename=')) {
+                    filename = disposition.split('filename=')[1].replace(/"/g, '');
+                  }
+                  a.download = filename;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  window.URL.revokeObjectURL(url);
+                  toast.success("备份已成功导出");
+                } catch (err) {
+                  toast.error(err.message);
+                }
+              }}>
+                <Download size={16} /> 导出安全备份
+              </button>
+            </div>
+
+            <div className="card glass" style={{ padding: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.05) 0%, transparent 100%)' }}>
+              <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--danger)' }}>
+                <Upload size={20} /> 从备份恢复数据
+              </h4>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                上传带有防伪签名的数据库备份文件。
+                <strong style={{ color: 'var(--danger)' }}>注意：恢复成功后，当前的所有数据将被完全覆盖！系统将触发重启，所有节点和用户将被强制断开，请谨慎操作。</strong>
+              </p>
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const fileInput = document.getElementById('restore-file');
+                if (!fileInput.files || fileInput.files.length === 0) {
+                  return toast.error("请先选择数据库备份文件");
+                }
+                const confirmMsg = "确定要恢复数据吗？此操作不可逆！\n系统会在恢复后自动重启。";
+                if (!window.confirm(confirmMsg)) return;
+                
+                const formData = new FormData();
+                formData.append('dbfile', fileInput.files[0]);
+                
+                try {
+                  const res = await fetch('/api/system/restore', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('clash_admin_token')}` },
+                    body: formData
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.error || '恢复失败');
+                  
+                  toast.success(data.message || '恢复成功，系统正在重启...');
+                  setTimeout(() => {
+                    localStorage.removeItem('clash_admin_token');
+                    localStorage.removeItem('clash_token');
+                    window.location.href = '/login';
+                  }, 2000);
+                } catch (err) {
+                  toast.error(err.message);
+                }
+              }}>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                  <input type="file" id="restore-file" accept=".db,.sqlite,.sqlite3" className="input" style={{ padding: '0.5rem', flex: 1 }} required />
+                  <button type="submit" className="btn btn-danger"><Upload size={16} /> 验证并恢复</button>
+                </div>
+              </form>
             </div>
           </div>
         )}

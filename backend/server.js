@@ -10,6 +10,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const db = require('./db');
 const si = require('systeminformation');
+const multer = require('multer');
+const upload = multer({ dest: path.join(__dirname, 'data') });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1197,6 +1199,89 @@ app.get('/api/audit/dashboard', authenticate, requireAdmin, (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------------------------------------------------
+// System Backup & Restore
+// ------------------------------------------------------------
+app.get('/api/system/backup', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const backupDbPath = path.join(__dirname, 'data', `backup_temp_${Date.now()}.db`);
+    await db.backup(backupDbPath);
+    
+    // Open backup db to inject metadata
+    const Database = require('better-sqlite3');
+    const backupDb = new Database(backupDbPath);
+    backupDb.exec('CREATE TABLE IF NOT EXISTS _clash_backup_meta (timestamp INTEGER, signature TEXT)');
+    const timestamp = Date.now();
+    const signature = crypto.createHmac('sha256', JWT_SECRET).update(timestamp.toString()).digest('hex');
+    backupDb.prepare('INSERT INTO _clash_backup_meta (timestamp, signature) VALUES (?, ?)').run(timestamp, signature);
+    backupDb.close();
+
+    res.download(backupDbPath, `clash_backup_${timestamp}.db`, (err) => {
+      if (err) console.error('Download error:', err);
+      // Clean up temp file
+      if (fs.existsSync(backupDbPath)) {
+        fs.unlinkSync(backupDbPath);
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/system/restore', authenticate, requireAdmin, upload.single('dbfile'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: '未上传数据库文件' });
+  }
+  
+  const uploadPath = req.file.path;
+  const Database = require('better-sqlite3');
+  let tempDb;
+  try {
+    tempDb = new Database(uploadPath);
+    const meta = tempDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_clash_backup_meta'").get();
+    if (!meta) {
+      throw new Error('该备份文件无效或没有防伪签名');
+    }
+    
+    const row = tempDb.prepare('SELECT timestamp, signature FROM _clash_backup_meta ORDER BY timestamp DESC LIMIT 1').get();
+    if (!row) {
+      throw new Error('未找到防伪签名记录');
+    }
+    
+    const expectedSignature = crypto.createHmac('sha256', JWT_SECRET).update(row.timestamp.toString()).digest('hex');
+    if (row.signature !== expectedSignature) {
+      throw new Error('防伪签名校验失败，可能文件被篡改或并非来自此系统');
+    }
+    
+    // Valid backup, clean up meta table
+    tempDb.exec('DROP TABLE _clash_backup_meta');
+    tempDb.close();
+    
+    // Backup current
+    const currentDbPath = path.join(__dirname, 'data', 'data.db');
+    const fallbackPath = path.join(__dirname, 'data', `data_fallback_${Date.now()}.db`);
+    if (fs.existsSync(currentDbPath)) {
+      fs.copyFileSync(currentDbPath, fallbackPath);
+    }
+    
+    db.close();
+    fs.copyFileSync(uploadPath, currentDbPath);
+    fs.unlinkSync(uploadPath);
+    
+    res.json({ success: true, message: '恢复成功，系统即将重启以应用数据' });
+    
+    setTimeout(() => {
+      console.log('Restarting due to database restore...');
+      process.exit(0);
+    }, 1000);
+    
+  } catch (err) {
+    if (tempDb && tempDb.open) tempDb.close();
+    if (fs.existsSync(uploadPath)) fs.unlinkSync(uploadPath);
+    res.status(400).json({ error: err.message });
   }
 });
 
