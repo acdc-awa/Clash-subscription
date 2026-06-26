@@ -1334,6 +1334,7 @@ app.get('/subscribe/:token', async (req, res) => {
     if (user.package_id) {
       const pkg = db.prepare('SELECT * FROM packages WHERE id = ?').get(user.package_id);
       if (pkg) {
+        user.total_traffic = pkg.traffic;
         ruleTemplateName = pkg.rule_template || "default";
         allowedInboundRows = db.prepare(`
           SELECT i.*, n.name as node_name, n.server as node_server FROM inbounds i
@@ -1452,17 +1453,11 @@ app.get('/subscribe/:token', async (req, res) => {
       ? Math.floor(new Date(user.expiry_time).getTime() / 1000) 
       : Math.floor(new Date().getTime() / 1000) + 315360000; // default 10 years
 
-    const gbToBytes = 1024 * 1024 * 1024;
-    const usedBytes = Math.floor((user.used_traffic || 0) * gbToBytes);
-    const totalBytes = Math.floor((user.total_traffic || 0) * gbToBytes);
-    const uploadBytes = Math.floor(usedBytes / 2);
-    const downloadBytes = Math.ceil(usedBytes / 2);
-
     res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(user.email)}.yaml"`);
     res.setHeader('profile-update-interval', '24');
     res.setHeader('profile-title', user.email);
-    res.setHeader('Subscription-Userinfo', `upload=${uploadBytes}; download=${downloadBytes}; total=${totalBytes}; expire=${expiryTimeUnix}`);
+    res.setHeader('Subscription-Userinfo', `upload=${Math.floor((user.used_traffic || 0) / 2)}; download=${Math.ceil((user.used_traffic || 0) / 2)}; total=${user.total_traffic || 0}; expire=${expiryTimeUnix}`);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     return res.send(finalYaml);
 
