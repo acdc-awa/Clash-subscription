@@ -508,6 +508,7 @@ function UserDashboard() {
   const [profile, setProfile] = useState(null);
   const [nodes, setNodes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Change Password State
   const [showChangePwd, setShowChangePwd] = useState(false);
@@ -581,18 +582,35 @@ function UserDashboard() {
     : 0;
 
   return (
-    <div className="dashboard-container">
-      <header className="glass header-nav">
-        <div className="brand">Clash 订阅控制台</div>
-        <div className="user-actions">
-          <span className="email-badge">{profile?.email}</span>
+    <div className="app-container">
+      {/* Mobile Drawer Overlay */}
+      <div className={`sidebar-overlay ${mobileMenuOpen ? 'open' : ''}`} onClick={() => setMobileMenuOpen(false)}></div>
+      
+      <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
+        <div className="sidebar-header">
+          <h1 className="brand" style={{ margin: 0, fontSize: '1.6rem', background: 'linear-gradient(135deg, #a78bfa, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 800 }}>Clash Panel</h1>
+        </div>
+        <nav className="sidebar-nav">
+          <button className="tab-btn active" onClick={() => setMobileMenuOpen(false)}>我的订阅</button>
+        </nav>
+        <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{profile?.email}</span>
+          <ThemeToggleButton style={{ margin: '0 auto', marginBottom: '8px' }} />
           {profile?.role === 'admin' && (
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin')}>后台管理</button>
           )}
           <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
-          <button className="btn btn-danger btn-sm" onClick={handleLogout}>退出</button>
+          <button className="btn btn-danger btn-sm" onClick={handleLogout}>退出登录</button>
         </div>
-      </header>
+      </aside>
+
+      <main className="main-content">
+        <div className="topbar">
+          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(true)}>
+            <Menu size={24} />
+          </button>
+          <h2>订阅控制台</h2>
+        </div>
 
       {/* Change Password Modal */}
       {showChangePwd && (
@@ -624,7 +642,7 @@ function UserDashboard() {
         </div>
       )}
 
-      <main className="dashboard-content">
+      <div className="summary-wrapper" style={{ padding: '1.5rem' }}>
         {/* Row 1: Profile & Traffic Card */}
         <section className="grid-2">
           {/* Card A: Traffic details */}
@@ -706,6 +724,7 @@ function UserDashboard() {
             </div>
           )}
         </section>
+      </div>
       </main>
     </div>
   );
