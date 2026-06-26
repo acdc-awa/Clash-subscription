@@ -1051,6 +1051,16 @@ function AdminDashboard() {
     }
   };
 
+  const handleUpdateDaemon = async (id) => {
+    if (!window.confirm(`确定要向节点 "${id}" 下发远程升级守护进程的指令吗？`)) return;
+    try {
+      const res = await apiFetch('POST', `/api/nodes/${id}/update_daemon`);
+      showToast(res.message || '升级指令已下发', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const handleDeleteNode = async (id) => {
     if (!window.confirm(`确定要彻底删除节点 "${id}" 并阻断其Daemon长连接吗？`)) return;
     try {
@@ -1604,6 +1614,7 @@ function AdminDashboard() {
                               showToast('一键部署命令已复制', 'success');
                             }}><ClipboardCopy size={16} /></button>
                             <button className="btn-icon" title="查看推送日志" onClick={() => handleOpenNodeLogsModal(n)}><Terminal size={16} /></button>
+                            <button className="btn-icon" title="升级节点端" onClick={() => handleUpdateDaemon(n.id)}><CloudDownload size={16} /></button>
                             <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}><Edit2 size={16} /></button>
                             <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}><Trash2 size={16} /></button>
                           </>

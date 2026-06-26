@@ -466,6 +466,21 @@ function connectWS() {
       } else if (payload.event === 'RESTART_XRAY') {
         console.log(`[WebSocket] Received RESTART_XRAY. Executing restart...`);
         await restartXray();
+      } else if (payload.event === 'UPDATE_DAEMON') {
+        console.log(`[WebSocket] Received UPDATE_DAEMON. Downloading latest daemon files...`);
+        try {
+          const httpUrl = CONTROLLER_URL.replace('wss://', 'https://').replace('ws://', 'http://');
+          await runCmd(`curl -sS -L -o /etc/xray-daemon/daemon.js ${httpUrl}/daemon.js`);
+          await runCmd(`curl -sS -L -o /etc/xray-daemon/xray.proto ${httpUrl}/xray.proto`);
+          console.log(`[WebSocket] Daemon files updated successfully. Initiating self-restart...`);
+          // Send acknowledgment back before dying
+          ws.send(JSON.stringify({ type: 'sync_log', message: 'Daemon updated successfully. Restarting...' }));
+          // Exit so systemd can restart the process with new code
+          setTimeout(() => process.exit(0), 1000);
+        } catch (updateErr) {
+          console.error(`[WebSocket] Failed to update daemon:`, updateErr.message);
+          ws.send(JSON.stringify({ type: 'sync_log', message: `Update failed: ${updateErr.message}` }));
+        }
       }
     } catch (e) {
       console.error("[-] Failed to process WS message:", e.message);

@@ -433,6 +433,29 @@ app.get('/api/nodes/:id/logs', authenticate, requireAdmin, (req, res) => {
   }
 });
 
+app.post('/api/nodes/:id/update_daemon', authenticate, requireAdmin, (req, res) => {
+  try {
+    const nodeId = req.params.id;
+    const ws = activeNodes.get(nodeId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return res.status(400).json({ error: `节点 ${nodeId} 目前不在线，无法下发更新指令。` });
+    }
+    
+    // Push update command to daemon
+    ws.send(JSON.stringify({ event: 'UPDATE_DAEMON' }));
+    
+    // Log the action
+    db.prepare(`
+      INSERT INTO node_sync_logs (node_id, action, status, message)
+      VALUES (?, ?, ?, ?)
+    `).run(nodeId, 'UPDATE_DAEMON', 'PENDING', 'OTA update command dispatched to daemon.');
+    
+    res.json({ message: `已向节点 ${nodeId} 下发更新指令，守护进程将自行下载并重启。` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/nodes', authenticate, requireAdmin, (req, res) => {
   try {
     const { id, name, server, multiplier, region, advanced_config } = req.body;
