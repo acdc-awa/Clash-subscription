@@ -1453,11 +1453,11 @@ function AdminDashboard() {
                               {u.status === 'active' ? '正常' : u.status === 'expired' ? '已过期' : '封禁'}
                             </span>
                           </td>
-                          <td className="cell-actions">
-                            <button className="btn-icon" title="编辑" onClick={() => handleOpenUserModal(u)}></button>
-                            <button className="btn-icon" title="重置流量" onClick={() => handleResetUserTraffic(u)}></button>
+                          <td className="cell-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleOpenUserModal(u)}>编辑</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleResetUserTraffic(u)}>清零</button>
                             {u.email !== 'admin@clash.sub' && (
-                              <button className="btn-icon danger" title="删除" onClick={() => handleDeleteUser(u.uuid, u.email)}></button>
+                              <button className="btn btn-danger btn-sm" onClick={() => handleDeleteUser(u.uuid, u.email)}>删除</button>
                             )}
                           </td>
                         </tr>
@@ -1560,10 +1560,10 @@ function AdminDashboard() {
                               {inb.security.toUpperCase()}
                             </span>
                           </td>
-                          <td style={{ fontSize: '0.85rem', color: '#ccc' }}>{summary}</td>
-                          <td className="cell-actions">
-                            <button className="btn-icon" title="编辑" onClick={() => handleOpenInboundModal(inb)}></button>
-                            <button className="btn-icon danger" title="删除" onClick={() => handleDeleteInbound(inb.id)}></button>
+                          <td style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>{summary}</td>
+                          <td className="cell-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleOpenInboundModal(inb)}>编辑</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => handleDeleteInbound(inb.id)}>删除</button>
                           </td>
                         </tr>
                       );
@@ -1604,9 +1604,9 @@ function AdminDashboard() {
                         <td>{formatTraffic(pkg.traffic)}</td>
                         <td className="cell-dim">{pkg.duration_days} 天</td>
                         <td style={{ fontWeight: 700, color: 'var(--success)' }}>¥ {pkg.price}</td>
-                        <td className="cell-actions">
-                          <button className="btn-icon" title="编辑" onClick={() => handleOpenPkgModal(pkg)}></button>
-                          <button className="btn-icon danger" title="删除" onClick={() => handleDeletePkg(pkg.id, pkg.name)}></button>
+                        <td className="cell-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => handleOpenPkgModal(pkg)}>编辑</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => handleDeletePkg(pkg.id, pkg.name)}>删除</button>
                         </td>
                       </tr>
                     ))
@@ -1683,10 +1683,10 @@ function AdminDashboard() {
                         <tr key={rule.name}>
                           <td style={{ fontWeight: 600 }}>{rule.name} {rule.name === 'default' && <span className="badge badge-info">默认</span>}</td>
                           <td className="cell-dim" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem' }}>{previewLines}...</td>
-                          <td className="cell-actions">
-                            <button className="btn-icon" title="编辑" onClick={() => handleOpenRuleModal(rule)}></button>
+                          <td className="cell-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleOpenRuleModal(rule)}>编辑</button>
                             {rule.name !== 'default' && (
-                              <button className="btn-icon danger" title="删除" onClick={() => handleDeleteRule(rule.name)}></button>
+                              <button className="btn btn-danger btn-sm" onClick={() => handleDeleteRule(rule.name)}>删除</button>
                             )}
                           </td>
                         </tr>
@@ -1924,7 +1924,7 @@ function AdminDashboard() {
                       ...currentNode, 
                       advanced_config: { ...currentNode.advanced_config, restart_time: e.target.value }
                     })} 
-                    style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', padding: '4px 8px', borderRadius: '4px' }}
+                    style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '4px 8px', borderRadius: '4px' }}
                   />
                 </div>
 
@@ -1939,7 +1939,7 @@ function AdminDashboard() {
                       ...currentNode, 
                       advanced_config: { ...currentNode.advanced_config, report_interval: e.target.value }
                     })} 
-                    style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', padding: '4px 8px', borderRadius: '4px', width: '80px' }}
+                    style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '4px 8px', borderRadius: '4px', width: '80px' }}
                   />
                 </div>
               </div>
@@ -2039,7 +2039,7 @@ function AdminDashboard() {
                     if (nodeInbounds.length === 0) return null;
                     return (
                       <div key={node.id} style={{ marginBottom: '10px' }}>
-                        <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#ccc', marginBottom: '4px' }}>
+                        <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
                           {node.name} ({node.id})
                         </div>
                         <div style={{ paddingLeft: '10px' }}>

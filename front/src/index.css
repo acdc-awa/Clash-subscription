@@ -354,10 +354,26 @@ button, .btn {
   border: 1px solid transparent;
 }
 
+[data-theme='light'] .btn-ghost {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-secondary);
+}
+
 .btn-ghost:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
   border-color: rgba(255,255,255,0.1);
+}
+
+[data-theme='light'] .btn-ghost:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--text-primary);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.btn-sm {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
 }
 
 .btn-icon {
