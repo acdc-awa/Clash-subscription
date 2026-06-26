@@ -163,13 +163,13 @@ function getNetworkSpeeds() {
 
     const now = Date.now();
     const duration = (now - lastNetMetrics.time) / 1000;
-    const rxSpeed = duration > 0 ? Math.round((totalRx - lastNetMetrics.rx) / duration) : 0;
-    const txSpeed = duration > 0 ? Math.round((totalTx - lastNetMetrics.tx) / duration) : 0;
+    const rx_speed = duration > 0 ? Math.round((totalRx - lastNetMetrics.rx) / duration) : 0;
+    const tx_speed = duration > 0 ? Math.round((totalTx - lastNetMetrics.tx) / duration) : 0;
 
     lastNetMetrics = { rx: totalRx, tx: totalTx, time: now };
-    return { rxSpeed, txSpeed, rxTotal: totalRx, txTotal: totalTx };
+    return { rx_speed, tx_speed, rx_total: totalRx, tx_total: totalTx };
   } catch (e) {
-    return { rxSpeed: 0, txSpeed: 0, rxTotal: 0, txTotal: 0 };
+    return { rx_speed: 0, tx_speed: 0, rx_total: 0, tx_total: 0 };
   }
 }
 
