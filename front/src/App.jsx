@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff, Database, Download, Upload, Terminal } from 'lucide-react';
+import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff, Database, Download, Upload, Terminal, CloudDownload } from 'lucide-react';
 import './App.css';
 
 // ------------------------------------------------------------
@@ -803,6 +803,9 @@ function AdminDashboard() {
   const [pkgModalOpen, setPkgModalOpen] = useState(false);
   const [reportIntervalModalOpen, setReportIntervalModalOpen] = useState(false);
   const [intervalSecs, setIntervalSecs] = useState("30");
+  const [otaInfo, setOtaInfo] = useState(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [applyingUpdate, setApplyingUpdate] = useState(false);
 
   const fetchAdminData = async () => {
     try {
@@ -1308,6 +1311,41 @@ function AdminDashboard() {
       showToast(err.message, 'error');
     }
   };
+  // OTA Update
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      const res = await apiFetch('GET', '/api/system/update/check');
+      setOtaInfo(res);
+      if (res.has_update) {
+        showToast(`发现新版本: ${res.latest_version}`, 'success');
+      } else {
+        showToast('当前已是最新版本', 'info');
+      }
+    } catch (err) {
+      showToast('检查更新失败: ' + err.message, 'error');
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleApplyUpdate = async () => {
+    if (!otaInfo?.download_url) return;
+    if (!window.confirm(`确定要升级到 ${otaInfo.latest_version} 吗？这会覆盖现有文件并重启面板。`)) return;
+    
+    setApplyingUpdate(true);
+    try {
+      const res = await apiFetch('POST', '/api/system/update/apply', { download_url: otaInfo.download_url });
+      showToast(res.message, 'success');
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
+    } catch (err) {
+      showToast('升级失败: ' + err.message, 'error');
+      setApplyingUpdate(false);
+    }
+  };
+
 
   return (
     <div className="app-container">
@@ -1773,6 +1811,53 @@ function AdminDashboard() {
               <h3>数据维护与安全</h3>
             </div>
             
+            <div className="card glass" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
+              <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--primary)' }}>
+                <CloudDownload size={20} /> 系统 OTA 在线升级
+              </h4>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                当前部署模式支持免重新编译的极速一键升级。点击下方按钮检查并应用主控端代码更新，无需登录 SSH 终端！
+              </p>
+              
+              {otaInfo && (
+                <div style={{ background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
+                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem' }}>
+                    当前版本：<code style={{ color: 'var(--text-dim)' }}>{otaInfo.current_version}</code>
+                  </p>
+                  <p style={{ margin: '0', fontSize: '0.9rem' }}>
+                    最新版本：<code style={{ color: otaInfo.has_update ? 'var(--warning)' : 'var(--success)' }}>{otaInfo.latest_version}</code>
+                  </p>
+                  {otaInfo.has_update && (
+                    <div style={{ marginTop: '0.8rem', paddingTop: '0.8rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>更新日志：</strong>
+                      <pre style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>
+                        {otaInfo.changelog}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button 
+                  className="btn btn-ghost" 
+                  onClick={handleCheckUpdate}
+                  disabled={checkingUpdate || applyingUpdate}
+                >
+                  {checkingUpdate ? '正在检查...' : '检查更新'}
+                </button>
+                {otaInfo?.has_update && (
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={handleApplyUpdate}
+                    disabled={applyingUpdate}
+                  >
+                    {applyingUpdate ? '正在应用并重启...' : '一键极速升级'}
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div className="card glass" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
               <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--primary)' }}>
                 <Database size={20} /> 备份当前数据

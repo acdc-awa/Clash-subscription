@@ -11,6 +11,7 @@ const fs = require('fs');
 const db = require('./db');
 const si = require('systeminformation');
 const multer = require('multer');
+const { execSync } = require('child_process');
 const upload = multer({ dest: path.join(__dirname, 'data') });
 
 const app = express();
@@ -1210,6 +1211,59 @@ app.get('/api/audit/dashboard', authenticate, requireAdmin, (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------------------------------------------------
+// OTA Updates
+// ------------------------------------------------------------
+app.get('/api/system/update/check', authenticate, requireAdmin, async (req, res) => {
+  try {
+    let currentVersion = 'unknown';
+    try {
+      currentVersion = fs.readFileSync(path.join(__dirname, 'version.txt'), 'utf8').trim();
+    } catch(e) {}
+
+    const response = await fetch('https://api.github.com/repos/acdc-awa/Clash-subscription/releases/latest', {
+      headers: { 'User-Agent': 'Clash-Panel-OTA' }
+    });
+    if (!response.ok) throw new Error('Failed to fetch from GitHub API');
+    
+    const release = await response.json();
+    const latestVersion = release.tag_name;
+    const downloadUrl = release.assets?.find(a => a.name === 'clash-panel-release.tar.gz')?.browser_download_url;
+
+    res.json({
+      current_version: currentVersion,
+      latest_version: latestVersion,
+      has_update: currentVersion !== 'unknown' && latestVersion !== currentVersion,
+      changelog: release.body,
+      download_url: downloadUrl
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/system/update/apply', authenticate, requireAdmin, async (req, res) => {
+  const { download_url } = req.body;
+  if (!download_url) return res.status(400).json({ error: 'Missing download URL' });
+  
+  try {
+    console.log('[OTA] Downloading update from', download_url);
+    execSync(`curl -sL "${download_url}" -o /tmp/update.tar.gz`);
+    console.log('[OTA] Extracting update...');
+    execSync('tar -xzf /tmp/update.tar.gz -C /');
+    console.log('[OTA] Update extracted. Restarting...');
+    
+    res.json({ success: true, message: '更新已应用，系统将在 3 秒后重启。' });
+    
+    setTimeout(() => {
+      process.exit(0);
+    }, 3000);
+  } catch (err) {
+    console.error('[OTA] Update failed:', err.message);
+    res.status(500).json({ error: 'Update failed: ' + err.message });
   }
 });
 
