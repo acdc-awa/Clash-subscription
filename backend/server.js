@@ -18,24 +18,7 @@ let JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30m';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '2d';
 
-// Network stats polling for Central Server
-let centralNetStats = { rx_sec: 0, tx_sec: 0 };
-setInterval(async () => {
-  try {
-    const netStats = await si.networkStats();
-    if (netStats && netStats.length > 0) {
-      let rx = 0, tx = 0;
-      for (const iface of netStats) {
-        if (iface.operstate === 'up') {
-          rx += iface.rx_sec || 0;
-          tx += iface.tx_sec || 0;
-        }
-      }
-      centralNetStats.rx_sec = rx;
-      centralNetStats.tx_sec = tx;
-    }
-  } catch (err) {}
-}, 2000);
+// Network stats polling for Central Server removed (now aggregating node stats in real-time)
 
 if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
   if (!JWT_SECRET) JWT_SECRET = crypto.randomBytes(32).toString('hex');
@@ -190,7 +173,7 @@ const authenticate = (req, res, next) => {
     req.user = decoded; // Contains { uuid, email, role }
     next();
   } catch (err) {
-    return res.status(403).json({ error: '禁止访问：Token 无效或已过期' });
+    return res.status(401).json({ error: '未授权：Token 无效或已过期' });
   }
 };
 
@@ -316,7 +299,7 @@ app.post('/api/auth/refresh', (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE uuid = ?').get(decoded.uuid);
 
     if (!user || user.status !== 'active' || user.refresh_token !== refreshToken) {
-      return res.status(403).json({ error: '无效的 Refresh Token 或账户状态异常' });
+      return res.status(401).json({ error: '无效的 Refresh Token 或账户状态异常' });
     }
 
     const token = jwt.sign(
@@ -327,7 +310,7 @@ app.post('/api/auth/refresh', (req, res) => {
 
     res.json({ success: true, token });
   } catch (err) {
-    res.status(403).json({ error: 'Refresh Token 已过期或无效' });
+    res.status(401).json({ error: 'Refresh Token 已过期或无效' });
   }
 });
 
@@ -1160,9 +1143,31 @@ app.get('/api/audit/dashboard', authenticate, requireAdmin, (req, res) => {
       WHERE u.role = 'user'
     `).get();
     
-    // 3. Online node counts
+    // 3. Online node counts & cluster network speed
     const onlineNodesCount = activeNodes.size;
     const totalNodesCount = db.prepare('SELECT COUNT(*) as count FROM nodes').get().count;
+    
+    let totalRxSec = 0;
+    let totalTxSec = 0;
+    for (const [nodeId, ws] of activeNodes.entries()) {
+      const stats = db.prepare('SELECT network_rx, network_tx FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(nodeId);
+      if (stats) {
+        totalRxSec += stats.network_rx;
+        totalTxSec += stats.network_tx;
+      }
+    }
+
+    // 4. Today's traffic (daily_traffic)
+    const today = new Date().toISOString().split('T')[0];
+    const todayTotal = db.prepare("SELECT SUM(traffic) as sum FROM daily_traffic WHERE date = ? AND type = 'user'").get(today).sum || 0;
+    const topUsers = db.prepare("SELECT target_id as email, traffic FROM daily_traffic WHERE date = ? AND type = 'user' ORDER BY traffic DESC LIMIT 5").all(today);
+    const nodeTraffic = db.prepare(`
+      SELECT n.name, d.traffic 
+      FROM daily_traffic d
+      JOIN nodes n ON d.target_id = n.id
+      WHERE d.date = ? AND d.type = 'node'
+      ORDER BY d.traffic DESC
+    `).all(today);
 
     res.json({
       total_users: totalUsers,
@@ -1171,7 +1176,10 @@ app.get('/api/audit/dashboard', authenticate, requireAdmin, (req, res) => {
       total_limit_traffic: trafficStats.total_limit || 0,
       online_nodes: onlineNodesCount,
       total_nodes: totalNodesCount,
-      server_network: centralNetStats
+      cluster_network: { rx_sec: totalRxSec, tx_sec: totalTxSec },
+      today_traffic: todayTotal,
+      top_users_today: topUsers,
+      node_traffic_today: nodeTraffic
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1584,6 +1592,15 @@ wss.on('connection', (ws, request) => {
               const rawDelta = (uplink || 0) + (downlink || 0);
               
               if (rawDelta > 0) {
+                const today = new Date().toISOString().split('T')[0];
+                
+                // Update daily traffic for node
+                db.prepare(`
+                  INSERT INTO daily_traffic (date, type, target_id, traffic)
+                  VALUES (?, 'node', ?, ?)
+                  ON CONFLICT(date, type, target_id) DO UPDATE SET traffic = traffic + excluded.traffic
+                `).run(today, nodeId, rawDelta);
+
                 // Apply node traffic multiplier
                 const delta = Math.round(rawDelta * nodeMultiplier);
 
@@ -1621,6 +1638,12 @@ wss.on('connection', (ws, request) => {
 
                   db.prepare('UPDATE users SET used_traffic = used_traffic + ? WHERE email = ?')
                     .run(delta, email);
+                  
+                  db.prepare(`
+                    INSERT INTO daily_traffic (date, type, target_id, traffic)
+                    VALUES (?, 'user', ?, ?)
+                    ON CONFLICT(date, type, target_id) DO UPDATE SET traffic = traffic + excluded.traffic
+                  `).run(today, email, delta);
 
                   const updatedUsed = user.used_traffic + delta;
                   const limit = user.total_traffic || 0;

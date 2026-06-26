@@ -104,6 +104,14 @@ db.exec(`
     detail TEXT NOT NULL,
     ip TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS daily_traffic (
+    date TEXT,
+    type TEXT,
+    target_id TEXT,
+    traffic INTEGER DEFAULT 0,
+    PRIMARY KEY (date, type, target_id)
+  );
 `);
 
 // Migration: package_nodes -> package_inbounds

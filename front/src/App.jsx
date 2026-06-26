@@ -137,6 +137,24 @@ function formatTraffic(bytes) {
   return `${mb.toFixed(2)} MB`;
 }
 
+const generatePieChartGradient = (nodesData) => {
+  if (!nodesData || nodesData.length === 0) return 'transparent';
+  const total = nodesData.reduce((sum, n) => sum + n.traffic, 0);
+  if (total === 0) return '#333';
+  
+  const colors = ['#00ff88', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'];
+  let currentAngle = 0;
+  const gradientStops = nodesData.map((n, i) => {
+    const percentage = (n.traffic / total) * 100;
+    const color = colors[i % colors.length];
+    const stop = `${color} ${currentAngle}% ${currentAngle + percentage}%`;
+    currentAngle += percentage;
+    return stop;
+  });
+  
+  return `conic-gradient(${gradientStops.join(', ')})`;
+};
+
 // ------------------------------------------------------------
 // 1. Login View Component
 // ------------------------------------------------------------
@@ -227,14 +245,13 @@ function Login() {
       {!forceChangePwd ? (
         <form className="login-card glass" onSubmit={handleLogin}>
           <div className="login-logo">⚡</div>
-          <h2>Clash Subscription Manager</h2>
-          <p className="login-subtitle">中控分布式管理面板</p>
+          <h2>ACDC Subscription Manager</h2>
+          <p className="ACDClogin-subtitle">用户登录</p>
           
           <div className="form-group">
             <label>账号邮箱</label>
             <input 
               type="text" 
-              placeholder="name@clash.sub" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={loading}
@@ -244,7 +261,6 @@ function Login() {
             <label>登录密码</label>
             <input 
               type="password" 
-              placeholder="••••••••" 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
@@ -266,7 +282,6 @@ function Login() {
             <label>新密码 (最少6位)</label>
             <input 
               type="password" 
-              placeholder="输入新密码" 
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               disabled={loading}
@@ -276,7 +291,6 @@ function Login() {
             <label>确认新密码</label>
             <input 
               type="password" 
-              placeholder="再次输入新密码" 
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               disabled={loading}
@@ -496,36 +510,41 @@ function UserDashboard() {
               <thead>
                 <tr>
                   <th>节点名称</th>
-                  <th>协议</th>
-                  <th>服务器</th>
-                  <th>端口</th>
+                  <th>当前带宽</th>
                   <th>状态</th>
-                  <th>节点负载</th>
                 </tr>
               </thead>
               <tbody>
                 {nodes.length === 0 ? (
-                  <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>暂无可用节点，请联系管理员分配。</td></tr>
+                  <tr><td colSpan="3" style={{ textAlign: 'center', padding: '2rem' }}>暂无可用节点，请联系管理员分配。</td></tr>
                 ) : (
                   nodes.map((node) => (
                     <tr key={node.id}>
                       <td style={{ fontWeight: 600 }}>{node.name}</td>
-                      <td><span className="badge badge-info">{node.type}</span></td>
-                      <td className="cell-dim">{node.server}</td>
-                      <td className="cell-dim">{node.port}</td>
-                      <td>
-                        <span className={`badge ${node.online ? 'badge-success' : 'badge-danger'}`}>
-                          {node.online ? '在线' : '离线'}
-                        </span>
-                      </td>
                       <td>
                         {node.online ? (
-                          <span className="load-span">
-                            CPU: {node.cpu_usage}% | 内存: {node.mem_usage}% | 在线: {node.online_users}人
+                          <span style={{ fontSize: '0.85rem' }}>
+                            ↑ {formatTraffic(node.network_tx || 0)}/s | ↓ {formatTraffic(node.network_rx || 0)}/s
                           </span>
                         ) : (
                           <span className="cell-dim">-</span>
                         )}
+                      </td>
+                      <td>
+                        <span style={{ 
+                          color: node.online ? '#00ff88' : '#ff4d4f', 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '6px',
+                          fontWeight: 'bold'
+                        }}>
+                          <span style={{ 
+                            width: '8px', height: '8px', borderRadius: '50%', 
+                            backgroundColor: node.online ? '#00ff88' : '#ff4d4f',
+                            boxShadow: `0 0 8px ${node.online ? '#00ff88' : '#ff4d4f'}`
+                          }}></span>
+                          {node.online ? '在线' : '离线'}
+                        </span>
                       </td>
                     </tr>
                   ))
@@ -1086,7 +1105,7 @@ function AdminDashboard() {
         </nav>
         <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{localStorage.getItem('clash_email')}</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>🔑 修改密码</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>🚪 安全退出</button>
         </div>
       </aside>
@@ -1121,7 +1140,7 @@ function AdminDashboard() {
               <div className="glass-card stat-box">
                 <span className="stat-label">已审计总流量</span>
                 <span className="stat-value">{formatTraffic(dashboardStats.total_used_traffic)}</span>
-                <span className="stat-sub">全网分配总流量额度: {formatTraffic(dashboardStats.total_limit_traffic)}</span>
+                <span className="stat-sub">总流量额度: {formatTraffic(dashboardStats.total_limit_traffic)}</span>
               </div>
               <div className="glass-card stat-box">
                 <span className="stat-label">整体流量使用率</span>
@@ -1136,18 +1155,79 @@ function AdminDashboard() {
 
             <section className="grid-2" style={{ marginTop: '1.5rem' }}>
               <div className="glass-card stat-box">
-                <span className="stat-label">中控网卡实时上行 (Tx)</span>
+                <span className="stat-label">集群总带宽实时上行 (Tx)</span>
                 <span className="stat-value" style={{ color: '#00d2ff' }}>
-                  {dashboardStats.server_network?.tx_sec > 0 ? (dashboardStats.server_network.tx_sec / 1024 / 1024).toFixed(2) : '0.00'} MB/s
+                  {dashboardStats.cluster_network?.tx_sec > 0 ? formatTraffic(dashboardStats.cluster_network.tx_sec) + '/s' : '0.00 B/s'}
                 </span>
-                <span className="stat-sub">实时监控面板网络负载</span>
+                <span className="stat-sub">聚合所有在线节点实时负载</span>
               </div>
               <div className="glass-card stat-box">
-                <span className="stat-label">中控网卡实时下行 (Rx)</span>
+                <span className="stat-label">集群总带宽实时下行 (Rx)</span>
                 <span className="stat-value" style={{ color: '#00ffcc' }}>
-                  {dashboardStats.server_network?.rx_sec > 0 ? (dashboardStats.server_network.rx_sec / 1024 / 1024).toFixed(2) : '0.00'} MB/s
+                  {dashboardStats.cluster_network?.rx_sec > 0 ? formatTraffic(dashboardStats.cluster_network.rx_sec) + '/s' : '0.00 B/s'}
                 </span>
-                <span className="stat-sub">实时监控面板网络负载</span>
+                <span className="stat-sub">聚合所有在线节点实时负载</span>
+              </div>
+            </section>
+            
+            <section className="grid-2" style={{ marginTop: '1.5rem' }}>
+              <div className="glass-card stat-box" style={{ display: 'flex', flexDirection: 'column' }}>
+                <span className="stat-label">今日总流量消耗</span>
+                <span className="stat-value" style={{ color: '#00ff88', margin: '0.5rem 0' }}>
+                  {formatTraffic(dashboardStats.today_traffic || 0)}
+                </span>
+                <div style={{ marginTop: '1rem', flex: 1 }}>
+                  <span className="stat-label" style={{ display: 'block', marginBottom: '0.5rem' }}>🏆 用户消耗排行 (Top 5)</span>
+                  <table style={{ width: '100%', fontSize: '0.9rem' }}>
+                    <tbody>
+                      {dashboardStats.top_users_today?.length > 0 ? (
+                        dashboardStats.top_users_today.map((u, i) => (
+                          <tr key={u.email}>
+                            <td style={{ padding: '4px 0' }}>{i + 1}. {u.email}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatTraffic(u.traffic)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr><td colSpan="2" className="cell-dim" style={{ padding: '4px 0' }}>今日暂无流量消耗</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
+              <div className="glass-card stat-box" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <span className="stat-label" style={{ alignSelf: 'flex-start' }}>🍰 今日节点流量占比</span>
+                {dashboardStats.node_traffic_today?.length > 0 ? (
+                  <div style={{ display: 'flex', gap: '2rem', width: '100%', alignItems: 'center', marginTop: '1rem', flex: 1 }}>
+                    <div 
+                      style={{ 
+                        width: '120px', 
+                        height: '120px', 
+                        borderRadius: '50%',
+                        background: generatePieChartGradient(dashboardStats.node_traffic_today),
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                        flexShrink: 0
+                      }}
+                    ></div>
+                    <div style={{ flex: 1, overflowY: 'auto', maxHeight: '150px' }}>
+                      {dashboardStats.node_traffic_today.map((n, i) => {
+                        const colors = ['#00ff88', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'];
+                        const color = colors[i % colors.length];
+                        return (
+                          <div key={n.name} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ width: 10, height: 10, backgroundColor: color, borderRadius: 2 }}></span>
+                              {n.name}
+                            </span>
+                            <span style={{ fontWeight: 'bold' }}>{formatTraffic(n.traffic)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                   <div className="cell-dim" style={{ marginTop: '2rem', flex: 1, display: 'flex', alignItems: 'center' }}>今日暂无节点流量数据</div>
+                )}
               </div>
             </section>
             
@@ -1276,15 +1356,26 @@ function AdminDashboard() {
                             </span>
                           </td>
                           <td>
-                            <span className={`badge ${n.online ? 'badge-success' : 'badge-danger'}`}>
+                            <span style={{ 
+                              color: n.online ? '#00ff88' : '#ff4d4f', 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: '6px',
+                              fontWeight: 'bold'
+                            }}>
+                              <span style={{ 
+                                width: '8px', height: '8px', borderRadius: '50%', 
+                                backgroundColor: n.online ? '#00ff88' : '#ff4d4f',
+                                boxShadow: `0 0 8px ${n.online ? '#00ff88' : '#ff4d4f'}`
+                              }}></span>
                               {n.online ? '已连接' : '未就绪'}
                             </span>
                           </td>
                           <td>
                             {n.online ? (
                               <div className="load-col">
-                                <span>CPU: {n.cpu_usage}% | 内存: {n.mem_usage}%</span>
-                                <span>在线: {n.online_users}人</span>
+                                <span>CPU: {n.cpu_usage}% | 内存: {n.mem_usage}% | 在线: {n.online_users}人</span>
+                                <span>↑ {formatTraffic(n.network_tx || 0)}/s | ↓ {formatTraffic(n.network_rx || 0)}/s</span>
                               </div>
                             ) : (
                               <span className="cell-dim">-</span>
