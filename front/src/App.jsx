@@ -623,12 +623,12 @@ function UserDashboard() {
           <button className="tab-btn active" onClick={() => setMobileMenuOpen(false)}>我的订阅</button>
         </nav>
         <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{profile?.email}</span>
+          <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', opacity: 0.8, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '34px', boxSizing: 'border-box' }}>{profile?.email}</span>
           {profile?.role === 'admin' && (
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin')}>后台管理</button>
+            <button className="btn btn-ghost btn-sm" style={{ height: '34px', boxSizing: 'border-box' }} onClick={() => navigate('/admin')}>后台管理</button>
           )}
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
-          <button className="btn btn-danger btn-sm" onClick={handleLogout}>退出登录</button>
+          <button className="btn btn-ghost btn-sm" style={{ height: '34px', boxSizing: 'border-box' }} onClick={() => setShowChangePwd(true)}>修改密码</button>
+          <button className="btn btn-danger btn-sm" style={{ height: '34px', boxSizing: 'border-box' }} onClick={handleLogout}><Trash2 size={14} style={{ marginRight: '6px' }} />安全退出</button>
         </div>
       </aside>
 
@@ -1311,9 +1311,9 @@ function AdminDashboard() {
           <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('rules'); setMobileMenuOpen(false); }}>规则模板</button>
         </nav>
         <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{localStorage.getItem('clash_email')}</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
-          <button className="btn btn-danger btn-sm" onClick={handleLogout}>安全退出</button>
+          <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', opacity: 0.8, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '34px', boxSizing: 'border-box' }}>{localStorage.getItem('clash_email')}</span>
+          <button className="btn btn-ghost btn-sm" style={{ height: '34px', boxSizing: 'border-box' }} onClick={() => setShowChangePwd(true)}>修改密码</button>
+          <button className="btn btn-danger btn-sm" style={{ height: '34px', boxSizing: 'border-box' }} onClick={handleLogout}>安全退出</button>
         </div>
       </aside>
 
@@ -2490,7 +2490,7 @@ function AdminDashboard() {
                         const newAliases = [...currentInbound.config.aliases];
                         newAliases.splice(idx, 1);
                         setCurrentInbound(prev => ({ ...prev, config: { ...prev.config, aliases: newAliases } }));
-                      }} style={{ padding: '0.5rem', marginBottom: '2px' }}></button>
+                      }} style={{ padding: '0.5rem', marginBottom: '2px' }}><Trash2 size={16} /></button>
                     </div>
                   ))
                 ) : (
