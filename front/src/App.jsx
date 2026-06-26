@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff } from 'lucide-react';
+import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff, Database, Download, Upload } from 'lucide-react';
 import './App.css';
 
 // ------------------------------------------------------------
