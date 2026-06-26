@@ -170,7 +170,11 @@ const authenticate = (req, res, next) => {
   const token = authHeader.slice(7);
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // Contains { uuid, email, role }
+    const user = db.prepare('SELECT password_hash, status FROM users WHERE uuid = ?').get(decoded.uuid);
+    if (!user || user.status !== 'active' || user.password_hash.substring(0, 8) !== decoded.pw_hash_prefix) {
+      return res.status(401).json({ error: '未授权：Token 无效或状态变更' });
+    }
+    req.user = decoded; // Contains { uuid, email, role, pw_hash_prefix }
     next();
   } catch (err) {
     return res.status(401).json({ error: '未授权：Token 无效或已过期' });
@@ -224,13 +228,13 @@ app.post('/api/auth/login', (req, res) => {
     }
 
     const token = jwt.sign(
-      { uuid: user.uuid, email: user.email, role: user.role },
+      { uuid: user.uuid, email: user.email, role: user.role, pw_hash_prefix: user.password_hash.substring(0, 8) },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
 
     const refreshToken = jwt.sign(
-      { uuid: user.uuid },
+      { uuid: user.uuid, pw_hash_prefix: user.password_hash.substring(0, 8) },
       JWT_REFRESH_SECRET,
       { expiresIn: JWT_REFRESH_EXPIRES_IN }
     );
@@ -303,7 +307,7 @@ app.post('/api/auth/refresh', (req, res) => {
     }
 
     const token = jwt.sign(
-      { uuid: user.uuid, email: user.email, role: user.role },
+      { uuid: user.uuid, email: user.email, role: user.role, pw_hash_prefix: user.password_hash.substring(0, 8) },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
@@ -792,10 +796,10 @@ app.put('/api/users/:uuid', authenticate, requireAdmin, (req, res) => {
         const salt = bcrypt.genSaltSync(10);
         const hash = bcrypt.hashSync(password, salt);
         if (used_traffic !== undefined) {
-          db.prepare('UPDATE users SET email = ?, password_hash = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ?, need_password_change = 0, used_traffic = ? WHERE uuid = ?')
+          db.prepare('UPDATE users SET email = ?, password_hash = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ?, need_password_change = 0, used_traffic = ?, refresh_token = NULL WHERE uuid = ?')
             .run(email, hash, role, package_id || null, finalExpiry, finalActivation, status || 'active', used_traffic, userUuid);
         } else {
-          db.prepare('UPDATE users SET email = ?, password_hash = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ?, need_password_change = 0 WHERE uuid = ?')
+          db.prepare('UPDATE users SET email = ?, password_hash = ?, role = ?, package_id = ?, expiry_time = ?, activation_time = ?, status = ?, need_password_change = 0, refresh_token = NULL WHERE uuid = ?')
             .run(email, hash, role, package_id || null, finalExpiry, finalActivation, status || 'active', userUuid);
         }
       } else {

@@ -2,9 +2,36 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu } from 'lucide-react';
+import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff } from 'lucide-react';
 import './App.css';
-import './App.css';
+
+// ------------------------------------------------------------
+// Password Input Component
+// ------------------------------------------------------------
+export function PasswordInput({ value, onChange, placeholder, disabled, onKeyDown, required }) {
+  const [showPassword, setShowPassword] = useState(false);
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+      <input
+        type={showPassword ? 'text' : 'password'}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        onKeyDown={onKeyDown}
+        required={required}
+        style={{ width: '100%', paddingRight: '40px' }}
+      />
+      <button
+        type="button"
+        onClick={() => setShowPassword(!showPassword)}
+        style={{ position: 'absolute', right: '10px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0, display: 'flex' }}
+      >
+        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+      </button>
+    </div>
+  );
+}
 
 // ------------------------------------------------------------
 // Global Contexts for Toast & State
@@ -197,6 +224,10 @@ async function apiFetch(method, urlPath, body = null) {
   let response = await fetch(urlPath, options);
 
   if (response.status === 401) {
+    if (urlPath === '/api/auth/login') {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || '用户名或密码错误');
+    }
     if (localStorage.getItem('clash_refresh_token') && urlPath !== '/api/auth/refresh') {
       try {
         const refreshResp = await fetch('/api/auth/refresh', {
@@ -368,8 +399,7 @@ function Login() {
           </div>
           <div className="form-group">
             <label>登录密码</label>
-            <input 
-              type="password" 
+            <PasswordInput 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
@@ -389,8 +419,7 @@ function Login() {
           
           <div className="form-group">
             <label>新密码 (最少6位)</label>
-            <input 
-              type="password" 
+            <PasswordInput 
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               disabled={loading}
@@ -398,8 +427,7 @@ function Login() {
           </div>
           <div className="form-group">
             <label>确认新密码</label>
-            <input 
-              type="password" 
+            <PasswordInput 
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               disabled={loading}
@@ -587,15 +615,15 @@ function UserDashboard() {
       <div className={`sidebar-overlay ${mobileMenuOpen ? 'open' : ''}`} onClick={() => setMobileMenuOpen(false)}></div>
       
       <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
-        <div className="sidebar-header">
+        <div className="sidebar-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 className="brand" style={{ margin: 0, fontSize: '1.6rem', background: 'linear-gradient(135deg, #a78bfa, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 800 }}>Clash Panel</h1>
+          <ThemeToggleButton />
         </div>
         <nav className="sidebar-nav">
           <button className="tab-btn active" onClick={() => setMobileMenuOpen(false)}>我的订阅</button>
         </nav>
         <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{profile?.email}</span>
-          <ThemeToggleButton style={{ margin: '0 auto', marginBottom: '8px' }} />
           {profile?.role === 'admin' && (
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin')}>后台管理</button>
           )}
@@ -623,15 +651,15 @@ function UserDashboard() {
             <form onSubmit={handleChangePassword}>
               <div className="form-group">
                 <label>旧密码</label>
-                <input type="password" required value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
+                <PasswordInput required value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
               </div>
               <div className="form-group">
                 <label>新密码</label>
-                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                <PasswordInput required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
               </div>
               <div className="form-group">
                 <label>确认新密码</label>
-                <input type="password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+                <PasswordInput required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
               </div>
               <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowChangePwd(false)}>取消</button>
@@ -1269,8 +1297,9 @@ function AdminDashboard() {
       <div className={`sidebar-overlay ${mobileMenuOpen ? 'open' : ''}`} onClick={() => setMobileMenuOpen(false)}></div>
       
       <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
-        <div className="sidebar-header">
+        <div className="sidebar-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 className="brand" style={{ margin: 0, fontSize: '1.6rem', background: 'linear-gradient(135deg, #a78bfa, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 800 }}>Clash Panel</h1>
+          <ThemeToggleButton />
         </div>
         <nav className="sidebar-nav">
           <button className={activeTab === 'summary' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('summary'); setMobileMenuOpen(false); }}>看板总览</button>
@@ -1283,7 +1312,6 @@ function AdminDashboard() {
         </nav>
         <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{localStorage.getItem('clash_email')}</span>
-          <ThemeToggleButton style={{ margin: '0 auto', marginBottom: '8px' }} />
           <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>安全退出</button>
         </div>
@@ -1743,8 +1771,7 @@ function AdminDashboard() {
               </div>
               <div className="form-group">
                 <label>{currentUser.uuid ? '重置密码 (留空则不修改密码)' : '登录密码 (留空默认使用生成的 UUID)'}</label>
-                <input 
-                  type="password" 
+                <PasswordInput 
                   value={currentUser.password} 
                   onChange={(e) => setCurrentUser({ ...currentUser, password: e.target.value })} 
                   placeholder="密码至少6位"
@@ -2535,15 +2562,15 @@ function AdminDashboard() {
             <form onSubmit={handleChangePassword}>
               <div className="form-group">
                 <label>旧密码</label>
-                <input type="password" required value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
+                <PasswordInput required value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
               </div>
               <div className="form-group">
                 <label>新密码</label>
-                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                <PasswordInput required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
               </div>
               <div className="form-group">
                 <label>确认新密码</label>
-                <input type="password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+                <PasswordInput required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
               </div>
               <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowChangePwd(false)}>取消</button>
