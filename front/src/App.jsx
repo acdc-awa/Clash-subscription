@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2 } from 'lucide-react';
+import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu } from 'lucide-react';
 import './App.css';
 import './App.css';
 
@@ -10,9 +10,23 @@ import './App.css';
 // Global Contexts for Toast & State
 // ------------------------------------------------------------
 const ToastContext = createContext(null);
+export const ThemeContext = createContext(null);
 
 export function useToast() {
   return useContext(ToastContext);
+}
+
+export function useThemeContext() {
+  return useContext(ThemeContext);
+}
+
+export function ThemeToggleButton({ style }) {
+  const { cycleTheme, renderThemeIcon } = useThemeContext();
+  return (
+    <button onClick={cycleTheme} className="theme-toggle-btn active" style={{ width: '40px', height: '40px', ...style }} title="切换主题">
+      {renderThemeIcon()}
+    </button>
+  );
 }
 
 // ------------------------------------------------------------
@@ -106,13 +120,21 @@ export default function App() {
     }, 3000);
   };
 
+  const cycleTheme = () => {
+    if (theme === 'system') setTheme('light');
+    else if (theme === 'light') setTheme('dark');
+    else setTheme('system');
+  };
+
+  const renderThemeIcon = () => {
+    if (theme === 'light') return <Sun size={18} />;
+    if (theme === 'dark') return <Moon size={18} />;
+    return <Monitor size={18} />;
+  };
+
   return (
-    <ToastContext.Provider value={{ showToast }}>
-      <div className="theme-toggle-container">
-        <button onClick={() => setTheme('light')} className={`theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}><Sun size={18} /></button>
-        <button onClick={() => setTheme('dark')} className={`theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}><Moon size={18} /></button>
-        <button onClick={() => setTheme('system')} className={`theme-toggle-btn ${theme === 'system' ? 'active' : ''}`}><Monitor size={18} /></button>
-      </div>
+    <ThemeContext.Provider value={{ theme, cycleTheme, renderThemeIcon }}>
+      <ToastContext.Provider value={{ showToast }}>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -131,7 +153,8 @@ export default function App() {
           </div>
         ))}
       </div>
-    </ToastContext.Provider>
+      </ToastContext.Provider>
+    </ThemeContext.Provider>
   );
 }
 
@@ -325,6 +348,9 @@ function Login() {
 
   return (
     <div className="login-wrapper">
+      <div style={{ position: 'fixed', top: '20px', right: '30px', zIndex: 1000, background: 'var(--bg-card)', padding: '6px', borderRadius: '24px', backdropFilter: 'blur(10px)', border: '1px solid var(--border-color)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+        <ThemeToggleButton />
+      </div>
       {!forceChangePwd ? (
         <form className="login-card glass" onSubmit={handleLogin}>
           <div className="login-logo">⚡</div>
@@ -693,6 +719,7 @@ function AdminDashboard() {
   const { showToast } = useToast();
   
   const [activeTab, setActiveTab] = useState('summary');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dashboardStats, setDashboardStats] = useState(null);
   
   // Data lists
@@ -1219,21 +1246,25 @@ function AdminDashboard() {
 
   return (
     <div className="app-container">
-      <aside className="sidebar">
+      {/* Mobile Drawer Overlay */}
+      <div className={`sidebar-overlay ${mobileMenuOpen ? 'open' : ''}`} onClick={() => setMobileMenuOpen(false)}></div>
+      
+      <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <h1 className="brand" style={{ margin: 0, fontSize: '1.6rem', background: 'linear-gradient(135deg, #a78bfa, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 800 }}>Clash Panel</h1>
         </div>
         <nav className="sidebar-nav">
-          <button className={activeTab === 'summary' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('summary')}>📈 看板总览</button>
-          <button className={activeTab === 'users' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('users')}>👤 用户管理</button>
-          <button className={activeTab === 'nodes' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('nodes')}>📡 节点配置</button>
-          <button className={activeTab === 'inbounds' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('inbounds')}>🔌 入站规则</button>
-          <button className={activeTab === 'packages' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('packages')}>📋 套餐定义</button>
-          <button className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('logs')}>📜 安全审计</button>
-          <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('rules')}>⚙️ 规则模板</button>
+          <button className={activeTab === 'summary' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('summary'); setMobileMenuOpen(false); }}>📈 看板总览</button>
+          <button className={activeTab === 'users' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('users'); setMobileMenuOpen(false); }}>👤 用户管理</button>
+          <button className={activeTab === 'nodes' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('nodes'); setMobileMenuOpen(false); }}>📡 节点配置</button>
+          <button className={activeTab === 'inbounds' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('inbounds'); setMobileMenuOpen(false); }}>🔌 入站规则</button>
+          <button className={activeTab === 'packages' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('packages'); setMobileMenuOpen(false); }}>📋 套餐定义</button>
+          <button className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('logs'); setMobileMenuOpen(false); }}>📜 安全审计</button>
+          <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('rules'); setMobileMenuOpen(false); }}>⚙️ 规则模板</button>
         </nav>
         <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{localStorage.getItem('clash_email')}</span>
+          <ThemeToggleButton style={{ margin: '0 auto', marginBottom: '8px' }} />
           <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>🚪 安全退出</button>
         </div>
@@ -1241,6 +1272,9 @@ function AdminDashboard() {
 
       <main className="main-content">
         <div className="topbar">
+          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(true)}>
+            <Menu size={24} />
+          </button>
           <h2>
             {activeTab === 'summary' && '📈 仪表盘总览'}
             {activeTab === 'users' && '👤 用户管理中心'}
