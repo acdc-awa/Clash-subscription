@@ -1877,7 +1877,7 @@ function AdminDashboard() {
               </div>
 
               <div className="form-group" style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
-                <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: '#94a3b8' }}>Xray 底层全局控制 (Xray Advanced Config)</h4>
+                <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Xray 底层全局控制 (Xray Advanced Config)</h4>
                 
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: '8px' }}>
                   <input 
@@ -1888,7 +1888,7 @@ function AdminDashboard() {
                       advanced_config: { ...currentNode.advanced_config, enable_sniffing: e.target.checked }
                     })} 
                   />
-                  <span style={{color: '#e2e8f0'}}>开启全协议流量嗅探 (Enable Sniffing: HTTP/TLS/QUIC)</span>
+                  <span style={{color: 'var(--text-primary)'}}>开启全协议流量嗅探 (Enable Sniffing: HTTP/TLS/QUIC)</span>
                 </label>
                 
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: '8px' }}>
@@ -1900,7 +1900,7 @@ function AdminDashboard() {
                       advanced_config: { ...currentNode.advanced_config, block_bittorrent: e.target.checked }
                     })} 
                   />
-                  <span style={{color: '#e2e8f0'}}>强制拦截 BT 下载 (Block BitTorrent)</span>
+                  <span style={{color: 'var(--text-primary)'}}>强制拦截 BT 下载 (Block BitTorrent)</span>
                 </label>
 
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
@@ -1912,11 +1912,11 @@ function AdminDashboard() {
                       advanced_config: { ...currentNode.advanced_config, block_private: e.target.checked }
                     })} 
                   />
-                  <span style={{color: '#e2e8f0'}}>屏蔽局域网 IP (Block Private LAN / geoip:private)</span>
+                  <span style={{color: 'var(--text-primary)'}}>屏蔽局域网 IP (Block Private LAN / geoip:private)</span>
                 </label>
 
                 <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <label style={{ color: '#e2e8f0', fontSize: '0.9rem' }}>每日自动固化配置与重载时间:</label>
+                  <label style={{ color: 'var(--text-primary)', fontSize: '0.9rem' }}>每日自动固化配置与重载时间:</label>
                   <input 
                     type="time" 
                     value={currentNode.advanced_config?.restart_time || "04:00"}
@@ -1929,7 +1929,7 @@ function AdminDashboard() {
                 </div>
 
                 <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <label style={{ color: '#e2e8f0', fontSize: '0.9rem' }}>心跳与上报间隔 (秒):</label>
+                  <label style={{ color: 'var(--text-primary)', fontSize: '0.9rem' }}>心跳与上报间隔 (秒):</label>
                   <input 
                     type="number" 
                     min="5"
