@@ -1764,7 +1764,7 @@ function AdminDashboard() {
               </p>
               <button className="btn btn-primary" onClick={async () => {
                 const token = localStorage.getItem('clash_admin_token');
-                if (!token) return toast.error("未找到有效的管理员令牌");
+                if (!token) return showToast("未找到有效的管理员令牌", 'error');
                 try {
                   const res = await fetch('/api/system/backup', {
                     headers: { 'Authorization': `Bearer ${token}` }
@@ -1787,9 +1787,9 @@ function AdminDashboard() {
                   a.click();
                   a.remove();
                   window.URL.revokeObjectURL(url);
-                  toast.success("备份已成功导出");
+                  showToast("备份已成功导出", 'success');
                 } catch (err) {
-                  toast.error(err.message);
+                  showToast(err.message, 'error');
                 }
               }}>
                 <Download size={16} /> 导出安全备份
@@ -1808,7 +1808,7 @@ function AdminDashboard() {
                 e.preventDefault();
                 const fileInput = document.getElementById('restore-file');
                 if (!fileInput.files || fileInput.files.length === 0) {
-                  return toast.error("请先选择数据库备份文件");
+                  return showToast("请先选择数据库备份文件", 'error');
                 }
                 const confirmMsg = "确定要恢复数据吗？此操作不可逆！\n系统会在恢复后自动重启。";
                 if (!window.confirm(confirmMsg)) return;
@@ -1825,14 +1825,14 @@ function AdminDashboard() {
                   const data = await res.json();
                   if (!res.ok) throw new Error(data.error || '恢复失败');
                   
-                  toast.success(data.message || '恢复成功，系统正在重启...');
+                  showToast(data.message || '恢复成功，系统正在重启...', 'success');
                   setTimeout(() => {
                     localStorage.removeItem('clash_admin_token');
                     localStorage.removeItem('clash_token');
                     window.location.href = '/login';
                   }, 2000);
                 } catch (err) {
-                  toast.error(err.message);
+                  showToast(err.message, 'error');
                 }
               }}>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
