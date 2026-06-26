@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare } from 'lucide-react';
+import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2 } from 'lucide-react';
 import './App.css';
 import './App.css';
 
@@ -108,10 +108,10 @@ export default function App() {
 
   return (
     <ToastContext.Provider value={{ showToast }}>
-      <div className="theme-toggle-fixed" style={{ position: 'fixed', top: '20px', right: '30px', zIndex: 1000, display: 'flex', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '5px', borderRadius: '20px', backdropFilter: 'blur(10px)' }}>
-        <button onClick={() => setTheme('light')} style={{ background: theme === 'light' ? 'var(--accent)' : 'transparent', border: 'none', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Sun size={16} /></button>
-        <button onClick={() => setTheme('dark')} style={{ background: theme === 'dark' ? 'var(--accent)' : 'transparent', border: 'none', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Moon size={16} /></button>
-        <button onClick={() => setTheme('system')} style={{ background: theme === 'system' ? 'var(--accent)' : 'transparent', border: 'none', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Monitor size={16} /></button>
+      <div className="theme-toggle-container">
+        <button onClick={() => setTheme('light')} className={`theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}><Sun size={18} /></button>
+        <button onClick={() => setTheme('dark')} className={`theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}><Moon size={18} /></button>
+        <button onClick={() => setTheme('system')} className={`theme-toggle-btn ${theme === 'system' ? 'active' : ''}`}><Monitor size={18} /></button>
       </div>
       <BrowserRouter>
         <Routes>
@@ -425,7 +425,7 @@ function NodeCard({ node, formatTraffic, actions }) {
           <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>{node.region || '🏳️'}</span>
           <div>
             <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)' }}>{node.name}</h4>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '4px 8px', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: statusColor, fontWeight: 'bold' }}>
                 <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: statusColor, boxShadow: `0 0 6px ${statusColor}` }}></span>
                 {isOnline ? 'Online' : 'Offline'}
@@ -1464,9 +1464,9 @@ function AdminDashboard() {
                             <button className="btn-icon" title="复制部署命令" onClick={() => {
                               navigator.clipboard.writeText(installCmd);
                               showToast('一键部署命令已复制', 'success');
-                            }}>📋</button>
-                            <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}>✏️</button>
-                            <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}>🗑</button>
+                            }}><ClipboardCopy size={16} /></button>
+                            <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}><Edit2 size={16} /></button>
+                            <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}><Trash2 size={16} /></button>
                           </>
                         }
                       />
