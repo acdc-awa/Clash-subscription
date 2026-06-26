@@ -148,7 +148,7 @@ export default function App() {
       <div id="toast-portal">
         {toasts.map((t) => (
           <div key={t.id} className={`toast toast-${t.type} ${t.fadeOut ? 'fade-out' : ''}`}>
-            <span>{t.type === 'success' ? '✅' : t.type === 'error' ? '❌' : 'ℹ️'}</span>
+            <span>{t.type === 'success' ? '' : t.type === 'error' ? '' : ''}</span>
             <span>{t.message}</span>
           </div>
         ))}
@@ -353,7 +353,7 @@ function Login() {
       </div>
       {!forceChangePwd ? (
         <form className="login-card glass" onSubmit={handleLogin}>
-          <div className="login-logo">⚡</div>
+          <div className="login-logo"></div>
           <h2>ACDC Subscription Manager</h2>
           <p className="ACDClogin-subtitle">用户登录</p>
           
@@ -383,7 +383,7 @@ function Login() {
         </form>
       ) : (
         <form className="login-card glass" onSubmit={handleForceChangePassword}>
-          <div className="login-logo">⚠️</div>
+          <div className="login-logo"></div>
           <h2>修改初始密码</h2>
           <p className="login-subtitle">为了您的账户安全，首次登录必须修改初始随机密码</p>
           
@@ -583,11 +583,11 @@ function UserDashboard() {
   return (
     <div className="dashboard-container">
       <header className="glass header-nav">
-        <div className="brand">⚡ Clash 订阅控制台</div>
+        <div className="brand">Clash 订阅控制台</div>
         <div className="user-actions">
           <span className="email-badge">{profile?.email}</span>
           {profile?.role === 'admin' && (
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin')}>⚙️ 后台管理</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin')}>后台管理</button>
           )}
           <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>退出</button>
@@ -630,7 +630,7 @@ function UserDashboard() {
           {/* Card A: Traffic details */}
           <div className="glass-card flex-col justify-between">
             <div>
-              <h3>📊 流量消耗与额度</h3>
+              <h3>流量消耗与额度</h3>
               <p className="card-desc">用量每分钟更新一次，超额后订阅将自动失效</p>
             </div>
             
@@ -649,14 +649,14 @@ function UserDashboard() {
             </div>
 
             <button className="btn btn-primary w-full" onClick={copySubLink}>
-              📋 复制 Clash 订阅链接
+              复制 Clash 订阅链接
             </button>
           </div>
 
           {/* Card B: Package details */}
           <div className="glass-card flex-col justify-between">
             <div>
-              <h3>👤 账户详情与服务</h3>
+              <h3>账户详情与服务</h3>
               <p className="card-desc">您的当前可用套餐及账期属性</p>
             </div>
 
@@ -686,14 +686,14 @@ function UserDashboard() {
             </div>
 
             <a className="btn btn-ghost w-full" href={`clash://install-config?url=${encodeURIComponent(window.location.origin + '/subscribe/' + profile?.token)}`}>
-              ⚡ 一键导入 Clash 客户端
+              一键导入 Clash 客户端
             </a>
           </div>
         </section>
 
         {/* Row 2: Nodes Table */}
         <section className="nodes-section">
-          <h3>📡 节点资源可用列表</h3>
+          <h3>节点资源可用列表</h3>
           <p className="section-subtitle">仅展示当前您有权连接的加速节点</p>
           
           {nodes.length === 0 ? (
@@ -1254,19 +1254,19 @@ function AdminDashboard() {
           <h1 className="brand" style={{ margin: 0, fontSize: '1.6rem', background: 'linear-gradient(135deg, #a78bfa, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 800 }}>Clash Panel</h1>
         </div>
         <nav className="sidebar-nav">
-          <button className={activeTab === 'summary' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('summary'); setMobileMenuOpen(false); }}>📈 看板总览</button>
-          <button className={activeTab === 'users' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('users'); setMobileMenuOpen(false); }}>👤 用户管理</button>
-          <button className={activeTab === 'nodes' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('nodes'); setMobileMenuOpen(false); }}>📡 节点配置</button>
-          <button className={activeTab === 'inbounds' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('inbounds'); setMobileMenuOpen(false); }}>🔌 入站规则</button>
-          <button className={activeTab === 'packages' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('packages'); setMobileMenuOpen(false); }}>📋 套餐定义</button>
-          <button className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('logs'); setMobileMenuOpen(false); }}>📜 安全审计</button>
-          <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('rules'); setMobileMenuOpen(false); }}>⚙️ 规则模板</button>
+          <button className={activeTab === 'summary' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('summary'); setMobileMenuOpen(false); }}>看板总览</button>
+          <button className={activeTab === 'users' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('users'); setMobileMenuOpen(false); }}>用户管理</button>
+          <button className={activeTab === 'nodes' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('nodes'); setMobileMenuOpen(false); }}>节点配置</button>
+          <button className={activeTab === 'inbounds' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('inbounds'); setMobileMenuOpen(false); }}>入站规则</button>
+          <button className={activeTab === 'packages' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('packages'); setMobileMenuOpen(false); }}>套餐定义</button>
+          <button className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('logs'); setMobileMenuOpen(false); }}>安全审计</button>
+          <button className={activeTab === 'rules' ? 'tab-btn active' : 'tab-btn'} onClick={() => { setActiveTab('rules'); setMobileMenuOpen(false); }}>规则模板</button>
         </nav>
         <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <span className="email-badge admin-badge" style={{ fontSize: '0.8rem', textAlign: 'center', marginBottom: '0.5rem', opacity: 0.8 }}>{localStorage.getItem('clash_email')}</span>
           <ThemeToggleButton style={{ margin: '0 auto', marginBottom: '8px' }} />
           <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePwd(true)}>修改密码</button>
-          <button className="btn btn-danger btn-sm" onClick={handleLogout}>🚪 安全退出</button>
+          <button className="btn btn-danger btn-sm" onClick={handleLogout}>安全退出</button>
         </div>
       </aside>
 
@@ -1276,13 +1276,13 @@ function AdminDashboard() {
             <Menu size={24} />
           </button>
           <h2>
-            {activeTab === 'summary' && '📈 仪表盘总览'}
-            {activeTab === 'users' && '👤 用户管理中心'}
-            {activeTab === 'nodes' && '📡 分布式节点集群'}
-            {activeTab === 'inbounds' && '🔌 全局入站规则'}
-            {activeTab === 'packages' && '📋 套餐与计费策略'}
-            {activeTab === 'logs' && '📜 系统安全审计'}
-            {activeTab === 'rules' && '⚙️ 路由规则模板'}
+            {activeTab === 'summary' && '仪表盘总览'}
+            {activeTab === 'users' && '用户管理中心'}
+            {activeTab === 'nodes' && '分布式节点集群'}
+            {activeTab === 'inbounds' && '全局入站规则'}
+            {activeTab === 'packages' && '套餐与计费策略'}
+            {activeTab === 'logs' && '系统安全审计'}
+            {activeTab === 'rules' && '路由规则模板'}
           </h2>
         </div>
         
@@ -1340,7 +1340,7 @@ function AdminDashboard() {
                   {formatTraffic(dashboardStats.today_traffic || 0)}
                 </span>
                 <div style={{ marginTop: '1rem', flex: 1 }}>
-                  <span className="stat-label" style={{ display: 'block', marginBottom: '0.5rem' }}>🏆 用户消耗排行 (Top 5)</span>
+                  <span className="stat-label" style={{ display: 'block', marginBottom: '0.5rem' }}>用户消耗排行 (Top 5)</span>
                   <table style={{ width: '100%', fontSize: '0.9rem' }}>
                     <tbody>
                       {dashboardStats.top_users_today?.length > 0 ? (
@@ -1359,7 +1359,7 @@ function AdminDashboard() {
               </div>
               
               <div className="glass-card stat-box" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <span className="stat-label" style={{ alignSelf: 'flex-start' }}>🍰 今日节点流量占比</span>
+                <span className="stat-label" style={{ alignSelf: 'flex-start' }}>今日节点流量占比</span>
                 {dashboardStats.node_traffic_today?.length > 0 ? (
                   <div style={{ display: 'flex', gap: '2rem', width: '100%', alignItems: 'center', marginTop: '1rem', flex: 1 }}>
                     <div 
@@ -1395,7 +1395,7 @@ function AdminDashboard() {
             </section>
             
             <div className="glass-card welcome-admin" style={{ marginTop: '1.5rem' }}>
-              <h3>⚡ 欢迎使用分布式中控系统</h3>
+              <h3>欢迎使用分布式中控系统</h3>
               <p>当前面板为中控节点，负责向分部在全球的被控端 Xray 实例发送同步命令，并通过 WSS 网关保持实时长连接以进行实时审计与规则防御。</p>
             </div>
           </div>
@@ -1405,7 +1405,7 @@ function AdminDashboard() {
         {activeTab === 'users' && (
           <div className="users-tab">
             <div className="action-row">
-              <h3>👤 用户管理控制台</h3>
+              <h3>用户管理控制台</h3>
               <button className="btn btn-primary btn-sm" onClick={() => handleOpenUserModal()}>+ 新增用户</button>
             </div>
             
@@ -1454,10 +1454,10 @@ function AdminDashboard() {
                             </span>
                           </td>
                           <td className="cell-actions">
-                            <button className="btn-icon" title="编辑" onClick={() => handleOpenUserModal(u)}>✏️</button>
-                            <button className="btn-icon" title="重置流量" onClick={() => handleResetUserTraffic(u)}>🔄</button>
+                            <button className="btn-icon" title="编辑" onClick={() => handleOpenUserModal(u)}></button>
+                            <button className="btn-icon" title="重置流量" onClick={() => handleResetUserTraffic(u)}></button>
                             {u.email !== 'admin@clash.sub' && (
-                              <button className="btn-icon danger" title="删除" onClick={() => handleDeleteUser(u.uuid, u.email)}>🗑</button>
+                              <button className="btn-icon danger" title="删除" onClick={() => handleDeleteUser(u.uuid, u.email)}></button>
                             )}
                           </td>
                         </tr>
@@ -1474,10 +1474,10 @@ function AdminDashboard() {
         {activeTab === 'nodes' && (
           <div className="nodes-tab">
             <div className="action-row">
-              <h3>📡 节点控制集群</h3>
+              <h3>节点控制集群</h3>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button className="btn btn-warning btn-sm" onClick={() => setReportIntervalModalOpen(true)}>⚙️ 刷新时间设置</button>
-                <button className="btn btn-primary btn-sm" onClick={handleForceReportAll}>🔄 一键强制刷新</button>
+                <button className="btn btn-warning btn-sm" onClick={() => setReportIntervalModalOpen(true)}>刷新时间设置</button>
+                <button className="btn btn-primary btn-sm" onClick={handleForceReportAll}>一键强制刷新</button>
                 <button className="btn btn-primary btn-sm" onClick={() => handleOpenNodeModal()}>+ 新增节点</button>
               </div>
             </div>
@@ -1517,7 +1517,7 @@ function AdminDashboard() {
         {activeTab === 'inbounds' && (
           <div className="inbounds-tab">
             <div className="action-row">
-              <h3>🔌 全局入站规则管理</h3>
+              <h3>全局入站规则管理</h3>
               <button className="btn btn-primary btn-sm" onClick={() => handleOpenInboundModal()}>+ 新增入站规则</button>
             </div>
             
@@ -1562,8 +1562,8 @@ function AdminDashboard() {
                           </td>
                           <td style={{ fontSize: '0.85rem', color: '#ccc' }}>{summary}</td>
                           <td className="cell-actions">
-                            <button className="btn-icon" title="编辑" onClick={() => handleOpenInboundModal(inb)}>✏️</button>
-                            <button className="btn-icon danger" title="删除" onClick={() => handleDeleteInbound(inb.id)}>🗑</button>
+                            <button className="btn-icon" title="编辑" onClick={() => handleOpenInboundModal(inb)}></button>
+                            <button className="btn-icon danger" title="删除" onClick={() => handleDeleteInbound(inb.id)}></button>
                           </td>
                         </tr>
                       );
@@ -1579,7 +1579,7 @@ function AdminDashboard() {
         {activeTab === 'packages' && (
           <div className="packages-tab">
             <div className="action-row">
-              <h3>📋 套餐计划与计费标准</h3>
+              <h3>套餐计划与计费标准</h3>
               <button className="btn btn-primary btn-sm" onClick={() => handleOpenPkgModal()}>+ 创建套餐</button>
             </div>
             
@@ -1605,8 +1605,8 @@ function AdminDashboard() {
                         <td className="cell-dim">{pkg.duration_days} 天</td>
                         <td style={{ fontWeight: 700, color: 'var(--success)' }}>¥ {pkg.price}</td>
                         <td className="cell-actions">
-                          <button className="btn-icon" title="编辑" onClick={() => handleOpenPkgModal(pkg)}>✏️</button>
-                          <button className="btn-icon danger" title="删除" onClick={() => handleDeletePkg(pkg.id, pkg.name)}>🗑</button>
+                          <button className="btn-icon" title="编辑" onClick={() => handleOpenPkgModal(pkg)}></button>
+                          <button className="btn-icon danger" title="删除" onClick={() => handleDeletePkg(pkg.id, pkg.name)}></button>
                         </td>
                       </tr>
                     ))
@@ -1621,8 +1621,8 @@ function AdminDashboard() {
         {activeTab === 'logs' && (
           <div className="logs-tab">
             <div className="action-row">
-              <h3>📜 安全审计与日志</h3>
-              <button className="btn btn-danger btn-sm" onClick={handleClearLogs}>🗑 清空审计日志</button>
+              <h3>安全审计与日志</h3>
+              <button className="btn btn-danger btn-sm" onClick={handleClearLogs}>清空审计日志</button>
             </div>
             
             <div className="table-container">
@@ -1660,7 +1660,7 @@ function AdminDashboard() {
         {activeTab === 'rules' && (
           <div className="rules-tab">
             <div className="action-row">
-              <h3>⚙️ Clash 规则配置模板</h3>
+              <h3>Clash 规则配置模板</h3>
               <button className="btn btn-primary btn-sm" onClick={() => handleOpenRuleModal()}>+ 新增规则模板</button>
             </div>
             
@@ -1684,9 +1684,9 @@ function AdminDashboard() {
                           <td style={{ fontWeight: 600 }}>{rule.name} {rule.name === 'default' && <span className="badge badge-info">默认</span>}</td>
                           <td className="cell-dim" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem' }}>{previewLines}...</td>
                           <td className="cell-actions">
-                            <button className="btn-icon" title="编辑" onClick={() => handleOpenRuleModal(rule)}>✏️</button>
+                            <button className="btn-icon" title="编辑" onClick={() => handleOpenRuleModal(rule)}></button>
                             {rule.name !== 'default' && (
-                              <button className="btn-icon danger" title="删除" onClick={() => handleDeleteRule(rule.name)}>🗑</button>
+                              <button className="btn-icon danger" title="删除" onClick={() => handleDeleteRule(rule.name)}></button>
                             )}
                           </td>
                         </tr>
@@ -2200,7 +2200,7 @@ function AdminDashboard() {
                 <div className="reality-section-box glass" style={{ padding: '1.5rem', marginTop: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div className="reality-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
                     <span style={{ fontWeight: 600, color: 'var(--success)' }}>Reality 混淆安全参数</span>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={handleGenerateInboundKeys}>🔑 智能生成密钥对</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={handleGenerateInboundKeys}>智能生成密钥对</button>
                   </div>
                   
                   <div className="form-group">
@@ -2444,7 +2444,7 @@ function AdminDashboard() {
                         const newAliases = [...currentInbound.config.aliases];
                         newAliases.splice(idx, 1);
                         setCurrentInbound(prev => ({ ...prev, config: { ...prev.config, aliases: newAliases } }));
-                      }} style={{ padding: '0.5rem', marginBottom: '2px' }}>🗑</button>
+                      }} style={{ padding: '0.5rem', marginBottom: '2px' }}></button>
                     </div>
                   ))
                 ) : (
