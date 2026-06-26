@@ -447,9 +447,9 @@ app.post('/api/nodes/:id/update_daemon', authenticate, requireAdmin, (req, res) 
     
     // Log the action
     db.prepare(`
-      INSERT INTO node_sync_logs (node_id, action, status, message)
-      VALUES (?, ?, ?, ?)
-    `).run(nodeId, 'UPDATE_DAEMON', 'PENDING', 'OTA update command dispatched to daemon.');
+      INSERT INTO node_sync_logs (node_id, timestamp, action, status, message)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(nodeId, Math.floor(Date.now() / 1000), 'UPDATE_DAEMON', 'PENDING', 'OTA update command dispatched to daemon.');
     
     res.json({ message: `已向节点 ${nodeId} 下发更新指令，守护进程将自行下载并重启。` });
   } catch (err) {
