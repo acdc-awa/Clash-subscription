@@ -415,6 +415,7 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
         online_users: stats ? stats.online_users : 0,
         network_rx: stats ? stats.network_rx : 0,
         network_tx: stats ? stats.network_tx : 0,
+        daemon_version: activeNodes.has(r.id) ? activeNodes.get(r.id).daemon_version : null,
         last_sync: lastSync ? { status: lastSync.status, timestamp: lastSync.timestamp, message: lastSync.message } : null
       };
     });
@@ -1769,6 +1770,9 @@ wss.on('connection', (ws, request) => {
         
         // 1. Process system logs
         if (system_stats) {
+          if (system_stats.version) {
+            ws.daemon_version = system_stats.version;
+          }
           const statsId = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
           db.prepare(`
             INSERT INTO node_stats (id, node_id, timestamp, cpu_usage, mem_usage, disk_usage, uptime, os_type, network_rx, network_tx, online_users)

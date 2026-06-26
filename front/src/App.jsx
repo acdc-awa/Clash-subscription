@@ -485,6 +485,7 @@ function NodeCard({ node, formatTraffic, actions }) {
                 {isOnline ? 'Online' : 'Offline'}
               </span>
               <span>• {node.os_type || 'Linux'}</span>
+              <span>• 版本: {node.daemon_version || '未知'}</span>
               <span>• Uptime: {Math.floor((node.uptime || 0) / 86400)}d</span>
               {node.last_sync && (
                 <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: node.last_sync.status === 'success' ? '#10b981' : '#ef4444', marginLeft: 'auto', background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px' }}>

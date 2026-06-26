@@ -15,6 +15,7 @@ const XRAY_SERVICE_NAME = process.env.XRAY_SERVICE_NAME || 'xray';
 const XRAY_API_ADDRESS = process.env.XRAY_API_ADDRESS || '127.0.0.1:10085';
 const PROTO_PATH = path.join(__dirname, 'xray.proto');
 const STATE_PATH = '/etc/xray-daemon/state.json';
+const DAEMON_VERSION = 'v0.0.3';
 
 if (!CONTROLLER_URL || !NODE_ID || !NODE_SECRET) {
   console.error("[-] Missing required environment variables (CONTROLLER_URL, NODE_ID, NODE_SECRET)");
@@ -325,7 +326,8 @@ async function reportCycle() {
       disk_usage: getDiskUsage(),
       uptime: getUptime(),
       os_type: getOsType(),
-      network: getNetworkSpeeds()
+      network: getNetworkSpeeds(),
+      version: DAEMON_VERSION
     };
 
     if (ws && ws.readyState === WebSocket.OPEN) {
