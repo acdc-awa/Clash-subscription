@@ -35,6 +35,28 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
+[data-theme='light'] {
+  --bg-dark: #f1f5f9;
+  --bg-card: rgba(255, 255, 255, 0.6);
+  --bg-card-hover: rgba(255, 255, 255, 0.8);
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-focus: rgba(139, 92, 246, 0.4);
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-dim: #64748b;
+  --accent: #7c3aed;
+  --accent-glow: rgba(124, 58, 237, 0.2);
+  --accent-hover: #6d28d9;
+  --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='light'] body::before {
+  background: 
+    radial-gradient(ellipse at 15% 30%, rgba(99, 102, 241, 0.15) 0%, transparent 60%),
+    radial-gradient(ellipse at 85% 20%, rgba(139, 92, 246, 0.1) 0%, transparent 60%),
+    radial-gradient(ellipse at 50% 85%, rgba(236, 72, 153, 0.08) 0%, transparent 60%);
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -129,17 +151,22 @@ body::before {
   box-shadow: var(--shadow);
 }
 
+/* ====== Shared UI Components ====== */
 .glass-card {
   background: var(--bg-card);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.05) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 1.8rem;
+  padding: 1.5rem;
   transition: var(--transition);
-  box-shadow: var(--shadow);
   position: relative;
   overflow: hidden;
+}
+
+[data-theme='light'] .glass-card {
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.03) 100%);
 }
 
 .glass-card::before {
@@ -154,6 +181,22 @@ body::before {
   border-color: rgba(255, 255, 255, 0.1);
   transform: translateY(-4px);
   box-shadow: 0 15px 40px -10px rgba(0, 0, 0, 0.8), 0 0 20px rgba(139, 92, 246, 0.1);
+}
+
+/* Circular Progress Bar Overrides */
+.CircularProgressbar-path {
+  stroke: var(--accent) !important;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.5s ease 0s;
+}
+.CircularProgressbar-trail {
+  stroke: var(--border-color) !important;
+}
+.CircularProgressbar-text {
+  fill: var(--text-primary) !important;
+  font-family: var(--font-sans);
+  font-size: 24px !important;
+  font-weight: 600;
 }
 
 /* ====== Common Form Elements ====== */

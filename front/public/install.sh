@@ -42,15 +42,31 @@ echo "========================================================="
 echo " Starting Xray Daemon Agent Setup on Node: $NODE_ID"
 echo "========================================================="
 
-# 0. Check for historical version
-if [ -d "/etc/xray-daemon" ] || systemctl is-active --quiet xray-daemon; then
-  echo "[+] Detected existing historical installation. Uninstalling daemon first..."
+# 0. Check for existing installation (Fast Update)
+if [ -d "/etc/xray-daemon" ] && systemctl list-unit-files | grep -q "xray-daemon.service"; then
+  echo "[+] Detected existing installation."
+  echo "[+] Performing FAST UPDATE (replacing daemon.js and restarting)..."
+  
+  HTTP_URL=$(echo "$CONTROLLER_URL" | sed 's/wss:\/\//https:\/\//g' | sed 's/ws:\/\//http:\/\//g')
+  
   systemctl stop xray-daemon 2>/dev/null || true
-  systemctl disable xray-daemon 2>/dev/null || true
-  rm -f /etc/systemd/system/xray-daemon.service
-  systemctl daemon-reload
-  rm -rf /etc/xray-daemon
-  echo "[+] Historical daemon uninstalled. Proceeding with fresh install."
+  curl -sS -L -o /etc/xray-daemon/daemon.js "$HTTP_URL/daemon.js"
+  curl -sS -L -o /etc/xray-daemon/xray.proto "$HTTP_URL/xray.proto"
+  
+  # Update environment variables
+  cat <<EOF > /etc/xray-daemon/config.env
+CONTROLLER_URL=$CONTROLLER_URL
+NODE_ID=$NODE_ID
+NODE_SECRET=$NODE_SECRET
+EOF
+  chmod 600 /etc/xray-daemon/config.env
+  
+  systemctl start xray-daemon
+  echo "========================================================="
+  echo " Update Completed Successfully!"
+  echo " Daemon is restarted with the new version."
+  echo "========================================================="
+  exit 0
 fi
 
 # 1. Update package list and install basic dependencies

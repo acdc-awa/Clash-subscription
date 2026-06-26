@@ -347,7 +347,7 @@ app.get('/api/user/profile', authenticate, (req, res) => {
 app.get('/api/user/nodes', authenticate, (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT DISTINCT n.id, n.name, n.server FROM nodes n
+      SELECT DISTINCT n.id, n.name, n.server, n.region, n.total_traffic FROM nodes n
       JOIN inbounds i ON n.id = i.node_id
       JOIN package_inbounds pi ON i.id = pi.inbound_id
       JOIN users u ON u.package_id = pi.package_id
@@ -355,7 +355,7 @@ app.get('/api/user/nodes', authenticate, (req, res) => {
     `).all(req.user.uuid);
 
     const nodes = rows.map(node => {
-      const stats = db.prepare('SELECT cpu_usage, mem_usage, online_users FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(node.id);
+      const stats = db.prepare('SELECT cpu_usage, mem_usage, disk_usage, uptime, os_type, online_users FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(node.id);
       const inboundsCount = db.prepare('SELECT COUNT(*) as count FROM inbounds WHERE node_id = ?').get(node.id).count;
       
       return {
@@ -364,6 +364,9 @@ app.get('/api/user/nodes', authenticate, (req, res) => {
         online: activeNodes.has(node.id),
         cpu_usage: stats ? stats.cpu_usage : 0,
         mem_usage: stats ? stats.mem_usage : 0,
+        disk_usage: stats ? stats.disk_usage : 0,
+        uptime: stats ? stats.uptime : 0,
+        os_type: stats ? stats.os_type : 'Linux',
         online_users: stats ? stats.online_users : 0
       };
     });
@@ -382,7 +385,7 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
   try {
     const rows = db.prepare('SELECT * FROM nodes').all();
     const nodes = rows.map(r => {
-      const stats = db.prepare('SELECT cpu_usage, mem_usage, online_users, network_rx, network_tx FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(r.id);
+      const stats = db.prepare('SELECT cpu_usage, mem_usage, disk_usage, uptime, os_type, online_users, network_rx, network_tx FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(r.id);
       const inboundsCount = db.prepare('SELECT COUNT(*) as count FROM inbounds WHERE node_id = ?').get(r.id).count;
 
       return {
@@ -391,11 +394,16 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
         server: r.server,
         secret: r.secret,
         multiplier: r.multiplier || 1.0,
+        region: r.region || '🏳️',
+        total_traffic: r.total_traffic || 0,
         advanced_config: r.advanced_config ? JSON.parse(r.advanced_config) : {},
         inbounds_count: inboundsCount,
         online: activeNodes.has(r.id),
         cpu_usage: stats ? stats.cpu_usage : 0,
         mem_usage: stats ? stats.mem_usage : 0,
+        disk_usage: stats ? stats.disk_usage : 0,
+        uptime: stats ? stats.uptime : 0,
+        os_type: stats ? stats.os_type : 'Linux',
         online_users: stats ? stats.online_users : 0,
         network_rx: stats ? stats.network_rx : 0,
         network_tx: stats ? stats.network_tx : 0
@@ -409,7 +417,7 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
 
 app.post('/api/nodes', authenticate, requireAdmin, (req, res) => {
   try {
-    const { id, name, server, multiplier, advanced_config } = req.body;
+    const { id, name, server, multiplier, region, advanced_config } = req.body;
     if (!id || !name || !server) {
       return res.status(400).json({ error: '请填齐节点服务器基础信息' });
     }
@@ -420,10 +428,11 @@ app.post('/api/nodes', authenticate, requireAdmin, (req, res) => {
     // Generate random secret for the node connection
     const nodeSecret = crypto.randomBytes(16).toString('hex');
     const mult = multiplier !== undefined ? Number(multiplier) : 1.0;
+    const nodeRegion = region || '🏳️';
     const advConfStr = advanced_config ? JSON.stringify(advanced_config) : '{}';
 
-    db.prepare('INSERT INTO nodes (id, name, server, secret, multiplier, advanced_config) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, name, server, nodeSecret, mult, advConfStr);
+    db.prepare('INSERT INTO nodes (id, name, server, secret, multiplier, region, advanced_config) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, name, server, nodeSecret, mult, nodeRegion, advConfStr);
 
     writeLog('CREATE_NODE', id, `新增服务器节点 ${name} (${id})，倍率 ${mult}`, req);
     res.status(201).json({ success: true, id, secret: nodeSecret });
@@ -435,7 +444,7 @@ app.post('/api/nodes', authenticate, requireAdmin, (req, res) => {
 app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
   try {
     const oldId = req.params.id;
-    const { id: newId, name, server, multiplier, advanced_config } = req.body;
+    const { id: newId, name, server, multiplier, region, advanced_config } = req.body;
     if (!newId || !name || !server) {
       return res.status(400).json({ error: '请填齐服务器信息' });
     }
@@ -449,11 +458,12 @@ app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
     }
 
     const mult = multiplier !== undefined ? Number(multiplier) : 1.0;
+    const nodeRegion = region || '🏳️';
     const advConfStr = advanced_config ? JSON.stringify(advanced_config) : '{}';
 
     db.transaction(() => {
-      db.prepare('UPDATE nodes SET id = ?, name = ?, server = ?, multiplier = ?, advanced_config = ? WHERE id = ?')
-        .run(newId, name, server, mult, advConfStr, oldId);
+      db.prepare('UPDATE nodes SET id = ?, name = ?, server = ?, multiplier = ?, region = ?, advanced_config = ? WHERE id = ?')
+        .run(newId, name, server, mult, nodeRegion, advConfStr, oldId);
 
       // 修复 inbound 主键：node_id 通过级联更新了，但 id 前缀仍是旧 node_id
       if (newId !== oldId) {
@@ -1562,14 +1572,17 @@ wss.on('connection', (ws, request) => {
         if (system_stats) {
           const statsId = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
           db.prepare(`
-            INSERT INTO node_stats (id, node_id, timestamp, cpu_usage, mem_usage, network_rx, network_tx, online_users)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO node_stats (id, node_id, timestamp, cpu_usage, mem_usage, disk_usage, uptime, os_type, network_rx, network_tx, online_users)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             statsId,
             nodeId,
             Math.floor(Date.now() / 1000),
             system_stats.cpu_usage || 0,
             system_stats.mem_usage || 0,
+            system_stats.disk_usage || 0,
+            system_stats.uptime || 0,
+            system_stats.os_type || 'Linux',
             system_stats.network ? system_stats.network.rx_speed || 0 : 0,
             system_stats.network ? system_stats.network.tx_speed || 0 : 0,
             user_traffic ? user_traffic.length : 0
@@ -1600,6 +1613,9 @@ wss.on('connection', (ws, request) => {
                   VALUES (?, 'node', ?, ?)
                   ON CONFLICT(date, type, target_id) DO UPDATE SET traffic = traffic + excluded.traffic
                 `).run(today, nodeId, rawDelta);
+
+                // Update total traffic for node
+                db.prepare(`UPDATE nodes SET total_traffic = total_traffic + ? WHERE id = ?`).run(rawDelta, nodeId);
 
                 // Apply node traffic multiplier
                 const delta = Math.round(rawDelta * nodeMultiplier);

@@ -1,5 +1,9 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
+import 'react-circular-progressbar/dist/styles.css';
+import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare } from 'lucide-react';
+import './App.css';
 import './App.css';
 
 // ------------------------------------------------------------
@@ -16,6 +20,64 @@ export function useToast() {
 // ------------------------------------------------------------
 export default function App() {
   const [toasts, setToasts] = useState([]);
+  const [theme, setTheme] = useState(localStorage.getItem('clash_theme') || 'system');
+
+  useEffect(() => {
+    const applyTheme = (t) => {
+      if (t === 'system') {
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      } else {
+        document.documentElement.setAttribute('data-theme', t);
+      }
+    };
+    applyTheme(theme);
+    localStorage.setItem('clash_theme', theme);
+  }, [theme]);
+
+  // Proactively check token expiration
+  useEffect(() => {
+    const checkToken = () => {
+      const token = localStorage.getItem('clash_token');
+      if (token) {
+        try {
+          const payloadBase64 = token.split('.')[1];
+          const decoded = JSON.parse(atob(payloadBase64));
+          if (decoded.exp && Date.now() >= decoded.exp * 1000) {
+            // Token expired, check for refresh token
+            const refreshToken = localStorage.getItem('clash_refresh_token');
+            if (refreshToken) {
+              fetch('/api/auth/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken })
+              }).then(res => {
+                if (res.ok) {
+                  return res.json().then(data => {
+                    localStorage.setItem('clash_token', data.token);
+                  });
+                } else {
+                  throw new Error('Refresh failed');
+                }
+              }).catch(() => {
+                localStorage.clear();
+                window.location.href = '/login';
+              });
+            } else {
+              localStorage.clear();
+              window.location.href = '/login';
+            }
+          }
+        } catch (e) {
+          // Invalid token format
+        }
+      }
+    };
+    
+    checkToken();
+    const intervalId = setInterval(checkToken, 10000); // Check every 10 seconds
+    return () => clearInterval(intervalId);
+  }, []);
 
   const showToast = (message, type = 'info') => {
     const id = Date.now() + Math.random().toString(36).substring(2, 5);
@@ -30,6 +92,11 @@ export default function App() {
 
   return (
     <ToastContext.Provider value={{ showToast }}>
+      <div className="theme-toggle-fixed" style={{ position: 'fixed', top: '20px', right: '30px', zIndex: 1000, display: 'flex', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '5px', borderRadius: '20px', backdropFilter: 'blur(10px)' }}>
+        <button onClick={() => setTheme('light')} style={{ background: theme === 'light' ? 'var(--accent)' : 'transparent', border: 'none', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Sun size={16} /></button>
+        <button onClick={() => setTheme('dark')} style={{ background: theme === 'dark' ? 'var(--accent)' : 'transparent', border: 'none', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Moon size={16} /></button>
+        <button onClick={() => setTheme('system')} style={{ background: theme === 'system' ? 'var(--accent)' : 'transparent', border: 'none', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Monitor size={16} /></button>
+      </div>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -309,6 +376,81 @@ function Login() {
 // ------------------------------------------------------------
 // 2. User Dashboard View Component (C-Side)
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// NodeCard Component for Dashboard rendering
+// ------------------------------------------------------------
+function NodeCard({ node, formatTraffic }) {
+  const isOnline = node.online;
+  const statusColor = isOnline ? '#10b981' : '#ef4444'; // success vs danger
+
+  const ProgressCircle = ({ value, text, IconComponent, color }) => (
+    <div style={{ width: '60px', height: '60px', position: 'relative' }}>
+      <CircularProgressbar
+        value={value}
+        styles={buildStyles({
+          pathColor: color,
+          trailColor: 'var(--border-color)',
+          strokeLinecap: 'round'
+        })}
+      />
+      <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <IconComponent size={14} color={color} style={{ marginBottom: '2px' }} />
+        <span style={{ fontSize: '0.65rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>{text}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem' }}>
+      
+      {/* Upper: Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>{node.region || '🏳️'}</span>
+          <div>
+            <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)' }}>{node.name}</h4>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: statusColor, fontWeight: 'bold' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: statusColor, boxShadow: `0 0 6px ${statusColor}` }}></span>
+                {isOnline ? 'Online' : 'Offline'}
+              </span>
+              <span>• {node.os_type || 'Linux'}</span>
+              <span>• Uptime: {Math.floor((node.uptime || 0) / 86400)}d</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ background: 'var(--bg-card-hover)', padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <ActivitySquare size={12} color="var(--accent)" />
+          <span>x{node.multiplier || 1.0}</span>
+        </div>
+      </div>
+
+      {/* Middle: Gauges */}
+      <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', background: 'rgba(0,0,0,0.1)', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+        <ProgressCircle value={node.cpu_usage || 0} text={`${Math.round(node.cpu_usage || 0)}%`} IconComponent={Cpu} color="#3b82f6" />
+        <ProgressCircle value={node.mem_usage || 0} text={`${Math.round(node.mem_usage || 0)}%`} IconComponent={MemoryStick} color="#8b5cf6" />
+        <ProgressCircle value={node.disk_usage || 0} text={`${Math.round(node.disk_usage || 0)}%`} IconComponent={HardDrive} color="#ec4899" />
+      </div>
+
+      {/* Lower: Network & Traffic Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Activity size={12} color="#10b981" /> Tx: {formatTraffic(node.network_tx || 0)}/s</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Activity size={12} color="#3b82f6" /> Rx: {formatTraffic(node.network_rx || 0)}/s</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'right' }}>
+          <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px' }}>
+            <Server size={12} /> Users: {node.online_users || 0}
+          </span>
+          <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px' }}>
+            Traffic: {formatTraffic(node.total_traffic || 0)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UserDashboard() {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -505,53 +647,15 @@ function UserDashboard() {
           <h3>📡 节点资源可用列表</h3>
           <p className="section-subtitle">仅展示当前您有权连接的加速节点</p>
           
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>节点名称</th>
-                  <th>当前带宽</th>
-                  <th>状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                {nodes.length === 0 ? (
-                  <tr><td colSpan="3" style={{ textAlign: 'center', padding: '2rem' }}>暂无可用节点，请联系管理员分配。</td></tr>
-                ) : (
-                  nodes.map((node) => (
-                    <tr key={node.id}>
-                      <td style={{ fontWeight: 600 }}>{node.name}</td>
-                      <td>
-                        {node.online ? (
-                          <span style={{ fontSize: '0.85rem' }}>
-                            ↑ {formatTraffic(node.network_tx || 0)}/s | ↓ {formatTraffic(node.network_rx || 0)}/s
-                          </span>
-                        ) : (
-                          <span className="cell-dim">-</span>
-                        )}
-                      </td>
-                      <td>
-                        <span style={{ 
-                          color: node.online ? '#00ff88' : '#ff4d4f', 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: '6px',
-                          fontWeight: 'bold'
-                        }}>
-                          <span style={{ 
-                            width: '8px', height: '8px', borderRadius: '50%', 
-                            backgroundColor: node.online ? '#00ff88' : '#ff4d4f',
-                            boxShadow: `0 0 8px ${node.online ? '#00ff88' : '#ff4d4f'}`
-                          }}></span>
-                          {node.online ? '在线' : '离线'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          {nodes.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-dim)' }}>暂无可用节点，请联系管理员分配。</div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem', marginTop: '1.5rem' }}>
+              {nodes.map(node => (
+                <NodeCard key={node.id} node={node} formatTraffic={formatTraffic} />
+              ))}
+            </div>
+          )}
         </section>
       </main>
     </div>
@@ -765,6 +869,7 @@ function AdminDashboard() {
         id: '',
         name: '',
         server: '',
+        region: '🏳️',
         multiplier: 1.0,
         advanced_config: {
           enable_sniffing: false,
@@ -788,6 +893,7 @@ function AdminDashboard() {
         id: currentNode.id,
         name: currentNode.name,
         server: currentNode.server,
+        region: currentNode.region,
         multiplier: Number(currentNode.multiplier || 1.0)
       };
 
@@ -1319,85 +1425,28 @@ function AdminDashboard() {
               </div>
             </div>
             
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>节点ID (Tag)</th>
-                    <th>节点名称</th>
-                    <th>服务器域名/IP</th>
-                    <th>结算倍率</th>
-                    <th>入站规则数</th>
-                    <th>通信连接</th>
-                    <th>资源与负载</th>
-                    <th>一键部署配置命令</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {nodes.length === 0 ? (
-                    <tr><td colSpan="9" style={{ textAlign: 'center', padding: '2rem' }}>暂无注册节点。</td></tr>
-                  ) : (
-                    nodes.map((n) => {
-                      const installCmd = `curl -sS https://${window.location.host}/install.sh | sudo bash -s -- --url wss://${window.location.host} --node ${n.id} --token ${n.secret || 'node-secret'}`;
-                      return (
-                        <tr key={n.id}>
-                          <td className="cell-id">{n.id}</td>
-                          <td style={{ fontWeight: 600 }}>{n.name}</td>
-                          <td className="cell-dim">{n.server}</td>
-                          <td>
-                            <span className="badge badge-warning" style={{ fontSize: '0.85rem' }}>
-                              {n.multiplier != null ? n.multiplier.toFixed(1) : '1.0'}x
-                            </span>
-                          </td>
-                          <td>
-                            <span className="badge badge-info">
-                              {n.inbounds_count || 0} 个入站
-                            </span>
-                          </td>
-                          <td>
-                            <span style={{ 
-                              color: n.online ? '#00ff88' : '#ff4d4f', 
-                              display: 'inline-flex', 
-                              alignItems: 'center', 
-                              gap: '6px',
-                              fontWeight: 'bold'
-                            }}>
-                              <span style={{ 
-                                width: '8px', height: '8px', borderRadius: '50%', 
-                                backgroundColor: n.online ? '#00ff88' : '#ff4d4f',
-                                boxShadow: `0 0 8px ${n.online ? '#00ff88' : '#ff4d4f'}`
-                              }}></span>
-                              {n.online ? '已连接' : '未就绪'}
-                            </span>
-                          </td>
-                          <td>
-                            {n.online ? (
-                              <div className="load-col">
-                                <span>CPU: {n.cpu_usage}% | 内存: {n.mem_usage}% | 在线: {n.online_users}人</span>
-                                <span>↑ {formatTraffic(n.network_tx || 0)}/s | ↓ {formatTraffic(n.network_rx || 0)}/s</span>
-                              </div>
-                            ) : (
-                              <span className="cell-dim">-</span>
-                            )}
-                          </td>
-                          <td>
-                            <button className="btn btn-ghost btn-sm" onClick={() => {
-                              navigator.clipboard.writeText(installCmd);
-                              showToast('一键部署命令已复制', 'success');
-                            }}>📋 复制脚本</button>
-                          </td>
-                          <td className="cell-actions">
-                            <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}>✏️</button>
-                            <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}>🗑</button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+            {nodes.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-dim)' }}>暂无注册节点。</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem', marginTop: '1.5rem' }}>
+                {nodes.map(n => {
+                  const installCmd = `curl -sS https://${window.location.host}/install.sh | sudo bash -s -- --url wss://${window.location.host} --node ${n.id} --token ${n.secret || 'node-secret'}`;
+                  return (
+                    <div key={n.id} style={{ position: 'relative' }}>
+                      <NodeCard node={n} formatTraffic={formatTraffic} />
+                      <div style={{ position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '4px', background: 'rgba(0,0,0,0.4)', padding: '4px', borderRadius: '8px' }}>
+                        <button className="btn-icon" title="复制脚本" onClick={() => {
+                          navigator.clipboard.writeText(installCmd);
+                          showToast('一键部署命令已复制', 'success');
+                        }}>📋</button>
+                        <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}>✏️</button>
+                        <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}>🗑</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
           </div>
         )}
@@ -1734,6 +1783,22 @@ function AdminDashboard() {
                     placeholder="hk1.example.com"
                     required
                   />
+                </div>
+                <div className="form-group">
+                  <label>节点所属地区 (Emoji)</label>
+                  <select 
+                    value={currentNode.region || '🏳️'} 
+                    onChange={(e) => setCurrentNode({ ...currentNode, region: e.target.value })}
+                  >
+                    <option value="🏳️">🏳️ 未知/通用</option>
+                    <option value="🇭🇰">🇭🇰 香港</option>
+                    <option value="🇹🇼">🇹🇼 台湾</option>
+                    <option value="🇯🇵">🇯🇵 日本</option>
+                    <option value="🇸🇬">🇸🇬 新加坡</option>
+                    <option value="🇺🇸">🇺🇸 美国</option>
+                    <option value="🇰🇷">🇰🇷 韩国</option>
+                    <option value="🇬🇧">🇬🇧 英国</option>
+                  </select>
                 </div>
                 <div className="form-group">
                   <label>流量结算倍率 (必填)</label>

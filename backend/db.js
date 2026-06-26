@@ -22,7 +22,9 @@ db.exec(`
     server TEXT NOT NULL,
     secret TEXT NOT NULL,
     multiplier REAL DEFAULT 1.0,
-    advanced_config TEXT DEFAULT '{}'
+    advanced_config TEXT DEFAULT '{}',
+    region TEXT DEFAULT '🏳️',
+    total_traffic INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS inbounds (
@@ -90,6 +92,9 @@ db.exec(`
     timestamp INTEGER NOT NULL,
     cpu_usage REAL NOT NULL,
     mem_usage REAL NOT NULL,
+    disk_usage REAL DEFAULT 0,
+    uptime INTEGER DEFAULT 0,
+    os_type TEXT DEFAULT 'Linux',
     network_rx INTEGER NOT NULL,
     network_tx INTEGER NOT NULL,
     online_users INTEGER NOT NULL,
@@ -113,6 +118,13 @@ db.exec(`
     PRIMARY KEY (date, type, target_id)
   );
 `);
+
+// --- Schema Migrations ---
+try { db.exec("ALTER TABLE nodes ADD COLUMN region TEXT DEFAULT '🏳️'"); } catch (e) {}
+try { db.exec("ALTER TABLE nodes ADD COLUMN total_traffic INTEGER DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE node_stats ADD COLUMN disk_usage REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE node_stats ADD COLUMN uptime INTEGER DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE node_stats ADD COLUMN os_type TEXT DEFAULT 'Linux'"); } catch (e) {}
 
 // Migration: package_nodes -> package_inbounds
 try {

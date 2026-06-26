@@ -108,6 +108,42 @@ function getMemUsage() {
   }
 }
 
+function getDiskUsage() {
+  try {
+    const stdout = require('child_process').execSync('df /').toString();
+    const lines = stdout.split('\n');
+    if (lines.length > 1) {
+      const parts = lines[1].trim().split(/\s+/);
+      const usePercentStr = parts[4]; // e.g. "45%"
+      return parseFloat(usePercentStr) || 0;
+    }
+  } catch(e) {}
+  return 0;
+}
+
+function getUptime() {
+  try {
+    const data = fs.readFileSync('/proc/uptime', 'utf8');
+    const uptimeSeconds = parseFloat(data.split(' ')[0]);
+    return Math.floor(uptimeSeconds);
+  } catch(e) {
+    return 0;
+  }
+}
+
+function getOsType() {
+  try {
+    if (fs.existsSync('/etc/os-release')) {
+      const data = fs.readFileSync('/etc/os-release', 'utf8');
+      const prettyNameMatch = data.match(/PRETTY_NAME="([^"]+)"/);
+      if (prettyNameMatch) return prettyNameMatch[1];
+      const nameMatch = data.match(/NAME="([^"]+)"/);
+      if (nameMatch) return nameMatch[1];
+    }
+  } catch(e) {}
+  return 'Linux';
+}
+
 function getNetworkSpeeds() {
   try {
     const data = fs.readFileSync('/proc/net/dev', 'utf8');
@@ -286,6 +322,9 @@ async function reportCycle() {
     const systemStats = {
       cpu_usage: getCpuUsage(),
       mem_usage: getMemUsage(),
+      disk_usage: getDiskUsage(),
+      uptime: getUptime(),
+      os_type: getOsType(),
       network: getNetworkSpeeds()
     };
 
