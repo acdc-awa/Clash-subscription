@@ -33,6 +33,22 @@ export default function App() {
     };
     applyTheme(theme);
     localStorage.setItem('clash_theme', theme);
+
+    if (theme === 'system') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const handleChange = (e) => {
+        document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+      };
+      // Modern browsers use addEventListener
+      if (mediaQuery.addEventListener) {
+        mediaQuery.addEventListener('change', handleChange);
+        return () => mediaQuery.removeEventListener('change', handleChange);
+      } else if (mediaQuery.addListener) {
+        // Fallback for older Safari
+        mediaQuery.addListener(handleChange);
+        return () => mediaQuery.removeListener(handleChange);
+      }
+    }
   }, [theme]);
 
   // Proactively check token expiration
@@ -379,7 +395,7 @@ function Login() {
 // ------------------------------------------------------------
 // NodeCard Component for Dashboard rendering
 // ------------------------------------------------------------
-function NodeCard({ node, formatTraffic }) {
+function NodeCard({ node, formatTraffic, actions }) {
   const isOnline = node.online;
   const statusColor = isOnline ? '#10b981' : '#ef4444'; // success vs danger
 
@@ -419,9 +435,16 @@ function NodeCard({ node, formatTraffic }) {
             </div>
           </div>
         </div>
-        <div style={{ background: 'var(--bg-card-hover)', padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <ActivitySquare size={12} color="var(--accent)" />
-          <span>x{node.multiplier || 1.0}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {actions && (
+            <div style={{ display: 'flex', gap: '4px', background: 'rgba(0,0,0,0.2)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              {actions}
+            </div>
+          )}
+          <div style={{ background: 'var(--bg-card-hover)', padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <ActivitySquare size={12} color="var(--accent)" />
+            <span>x{node.multiplier || 1.0}</span>
+          </div>
         </div>
       </div>
 
@@ -1432,16 +1455,21 @@ function AdminDashboard() {
                 {nodes.map(n => {
                   const installCmd = `curl -sS https://${window.location.host}/install.sh | sudo bash -s -- --url wss://${window.location.host} --node ${n.id} --token ${n.secret || 'node-secret'}`;
                   return (
-                    <div key={n.id} style={{ position: 'relative' }}>
-                      <NodeCard node={n} formatTraffic={formatTraffic} />
-                      <div style={{ position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '4px', background: 'rgba(0,0,0,0.4)', padding: '4px', borderRadius: '8px' }}>
-                        <button className="btn-icon" title="复制脚本" onClick={() => {
-                          navigator.clipboard.writeText(installCmd);
-                          showToast('一键部署命令已复制', 'success');
-                        }}>📋</button>
-                        <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}>✏️</button>
-                        <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}>🗑</button>
-                      </div>
+                    <div key={n.id}>
+                      <NodeCard 
+                        node={n} 
+                        formatTraffic={formatTraffic} 
+                        actions={
+                          <>
+                            <button className="btn-icon" title="复制部署命令" onClick={() => {
+                              navigator.clipboard.writeText(installCmd);
+                              showToast('一键部署命令已复制', 'success');
+                            }}>📋</button>
+                            <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}>✏️</button>
+                            <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}>🗑</button>
+                          </>
+                        }
+                      />
                     </div>
                   );
                 })}

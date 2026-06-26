@@ -30,9 +30,15 @@
   --radius-lg: 24px;
   --transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Inter', 'Twemoji Country Flags', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Outfit', var(--font-sans);
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+@font-face {
+  font-family: 'Twemoji Country Flags';
+  unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F;
+  src: url('https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1/dist/TwemojiCountryFlags.woff2') format('woff2');
 }
 
 [data-theme='light'] {
