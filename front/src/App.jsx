@@ -1868,12 +1868,42 @@ function AdminDashboard() {
                 />
               </div>
               <div className="form-group">
-                <label>{currentUser.uuid ? '重置密码 (留空则不修改密码)' : '登录密码 (留空默认使用生成的 UUID)'}</label>
-                <PasswordInput 
-                  value={currentUser.password} 
-                  onChange={(e) => setCurrentUser({ ...currentUser, password: e.target.value })} 
-                  placeholder="密码至少6位"
-                />
+                <label>{currentUser.uuid ? '重置密码' : '登录密码 (留空默认使用生成的 UUID)'}</label>
+                {currentUser.uuid ? (
+                  <div>
+                    {!currentUser.password ? (
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        onClick={() => {
+                          const randomPwd = Math.random().toString(36).slice(-8);
+                          setCurrentUser({ ...currentUser, password: randomPwd });
+                        }}
+                      >
+                        生成并重置 8 位随机密码
+                      </button>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--primary)', background: 'var(--bg-secondary)', padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)' }}>
+                          {currentUser.password}
+                        </span>
+                        <button 
+                          type="button" 
+                          className="btn btn-ghost btn-sm" 
+                          onClick={() => setCurrentUser({ ...currentUser, password: '' })}
+                        >
+                          取消重置
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <PasswordInput 
+                    value={currentUser.password} 
+                    onChange={(e) => setCurrentUser({ ...currentUser, password: e.target.value })} 
+                    placeholder="密码至少6位"
+                  />
+                )}
               </div>
               <div className="form-row">
                 <div className="form-group">
