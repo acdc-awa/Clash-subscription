@@ -51,7 +51,7 @@ fi
 
 # 4. 生成容器配置
 cat << 'INNER_EOF' > Dockerfile
-FROM node:24-slim
+FROM node:20-slim
 RUN apt-get update && apt-get install -y curl tar python3 make g++ gcc && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/backend
 CMD ["sh", "-c", "npm install --omit=dev && node server.js"]

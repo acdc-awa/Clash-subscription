@@ -69,7 +69,7 @@ docker run -d \
   -v $(pwd)/app/backend:/app/backend \
   -v $(pwd)/data:/app/backend/data \
   -w /app/backend \
-  node:24-slim \
+  node:20-slim \
   sh -c "apt-get update && apt-get install -y curl tar python3 make g++ gcc && npm install --omit=dev && node server.js"
 ```
 
