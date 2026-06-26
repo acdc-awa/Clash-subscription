@@ -554,6 +554,35 @@ tr:last-child td {
   display: none;
 }
 
+.theme-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.theme-toggle-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+
+.theme-toggle-btn.active {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.theme-toggle-btn.active:hover {
+  background: var(--bg-card-hover);
+}
+
 /* ====== Responsive Layout ====== */
 @media (max-width: 768px) {
   .app-container {
