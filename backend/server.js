@@ -1632,7 +1632,11 @@ function escapeRegExp(string) {
 // Static File Hosting (React Build)
 // ------------------------------------------------------------
 
-app.use(express.static(path.join(__dirname, '../front/dist')));
+const publicDir = fs.existsSync(path.join(__dirname, 'public')) 
+  ? path.join(__dirname, 'public') 
+  : path.join(__dirname, '../front/dist');
+
+app.use(express.static(publicDir));
 
 // Fallback to Index.html for React Router HTML5 History
 app.get('*', (req, res) => {
@@ -1640,7 +1644,7 @@ app.get('*', (req, res) => {
   if (requestPath.startsWith('/api/') || requestPath.startsWith('/subscribe/')) {
     return res.status(404).send("Not Found");
   }
-  res.sendFile(path.join(__dirname, '../front/dist/index.html'));
+  res.sendFile(path.join(publicDir, 'index.html'));
 });
 
 // ------------------------------------------------------------
