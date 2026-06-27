@@ -207,6 +207,8 @@ if command -v ufw &> /dev/null; then
   fi
   echo "[+] Allowing detected SSH port: $ssh_port/tcp"
   ufw allow "$ssh_port"/tcp comment 'SSH' || true
+  echo "[+] Allowing Daemon API port: 3000/tcp"
+  ufw allow 3000/tcp comment 'Xray-Daemon API' || true
   ufw --force enable || true
 fi
 

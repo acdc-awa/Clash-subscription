@@ -2,30 +2,27 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { exec } = require('child_process');
-const WebSocket = require('ws');
+const http = require('http');
 const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
 
 // Load environment variables
-const CONTROLLER_URL = process.env.CONTROLLER_URL; // wss://host
 const NODE_ID = process.env.NODE_ID;
 const NODE_SECRET = process.env.NODE_SECRET;
+const DAEMON_PORT = process.env.DAEMON_PORT || 3000;
 const XRAY_CONFIG_PATH = process.env.XRAY_CONFIG_PATH || '/usr/local/etc/xray/config.json';
 const XRAY_SERVICE_NAME = process.env.XRAY_SERVICE_NAME || 'xray';
 const XRAY_API_ADDRESS = process.env.XRAY_API_ADDRESS || '127.0.0.1:10085';
 const PROTO_PATH = path.join(__dirname, 'xray.proto');
 const STATE_PATH = '/etc/xray-daemon/state.json';
-const DAEMON_VERSION = 'v0.0.3';
+const DAEMON_VERSION = 'v1.0.0'; // Updated to Server Mode
 
-if (!CONTROLLER_URL || !NODE_ID || !NODE_SECRET) {
-  console.error("[-] Missing required environment variables (CONTROLLER_URL, NODE_ID, NODE_SECRET)");
+if (!NODE_ID || !NODE_SECRET) {
+  console.error("[-] Missing required environment variables (NODE_ID, NODE_SECRET)");
   process.exit(1);
 }
 
 // Global state variables
-let ws = null;
-let reconnectDelay = 2000;
-let reportInterval = null;
 let statsClient = null;
 
 // System metrics tracking
@@ -73,7 +70,6 @@ function getCpuUsage() {
     const data = fs.readFileSync('/proc/stat', 'utf8');
     const firstLine = data.split('\n')[0];
     const parts = firstLine.split(/\s+/).slice(1).map(Number);
-    // user nice system idle iowait irq softirq steal
     const idle = parts[3] + parts[4];
     const total = parts.reduce((a, b) => a + b, 0);
 
@@ -115,7 +111,7 @@ function getDiskUsage() {
     const lines = stdout.split('\n');
     if (lines.length > 1) {
       const parts = lines[1].trim().split(/\s+/);
-      const usePercentStr = parts[4]; // e.g. "45%"
+      const usePercentStr = parts[4];
       return parseFloat(usePercentStr) || 0;
     }
   } catch(e) {}
@@ -174,6 +170,18 @@ function getNetworkSpeeds() {
   }
 }
 
+function getSystemStats() {
+  return {
+    cpu_usage: getCpuUsage(),
+    mem_usage: getMemUsage(),
+    disk_usage: getDiskUsage(),
+    uptime: getUptime(),
+    os_type: getOsType(),
+    network: getNetworkSpeeds(),
+    version: DAEMON_VERSION
+  };
+}
+
 // ------------------------------------------------------------
 // UFW Firewall Rule Manager
 // ------------------------------------------------------------
@@ -215,9 +223,12 @@ async function applyUfwRules(newPorts) {
 
   // Save new state
   try {
+    fs.ensureDirSync(path.dirname(STATE_PATH)); // Usually exists
     fs.writeFileSync(STATE_PATH, JSON.stringify({ ports: newPorts }), 'utf8');
   } catch (e) {
-    console.error("[-] Failed to save state.json for UFW:", e.message);
+    try {
+      fs.writeFileSync(STATE_PATH, JSON.stringify({ ports: newPorts }), 'utf8');
+    } catch(err){}
   }
 }
 
@@ -226,49 +237,11 @@ async function applyUfwRules(newPorts) {
 // ------------------------------------------------------------
 
 function renderXrayConfig(inbounds, configObj) {
-  // If the backend provided a complete config, just write it
   if (configObj) {
     fs.writeFileSync(XRAY_CONFIG_PATH, JSON.stringify(configObj, null, 2), 'utf8');
     console.log(`[Config] Successfully wrote complete Xray config to ${XRAY_CONFIG_PATH}`);
     return;
   }
-
-  // Fallback for older versions
-  const fullConfig = {
-    log: { loglevel: "warning" },
-    api: {
-      tag: "api",
-      services: ["HandlerService", "StatsService"]
-    },
-    stats: {},
-    policy: {
-      levels: { "0": { statsUserUplink: true, statsUserDownlink: true } },
-      system: { statsInboundUplink: true, statsInboundDownlink: true }
-    },
-    inbounds: [
-      ...inbounds,
-      {
-        listen: "127.0.0.1",
-        port: 10085,
-        protocol: "dokodemo-door",
-        settings: { address: "127.0.0.1" },
-        tag: "api-in"
-      }
-    ],
-    outbounds: [
-      { protocol: "freedom", tag: "direct" },
-      { protocol: "blackhole", tag: "blocked" }
-    ],
-    routing: {
-      rules: [
-        { inboundTag: ["api-in"], outboundTag: "api", type: "field" },
-        { outboundTag: "blocked", ip: ["geoip:private"], type: "field" }
-      ]
-    }
-  };
-
-  fs.writeFileSync(XRAY_CONFIG_PATH, JSON.stringify(fullConfig, null, 2), 'utf8');
-  console.log(`[Config] Successfully wrote legacy Xray config to ${XRAY_CONFIG_PATH}`);
 }
 
 async function restartXray() {
@@ -299,11 +272,10 @@ function fetchXrayStats(reset = true) {
       const trafficMap = {};
       if (response && response.stat) {
         response.stat.forEach(item => {
-          // Format: user>>>email>>>traffic>>>direction
           const parts = item.name.split('>>>');
           if (parts.length >= 4) {
             const email = parts[1];
-            const direction = parts[3]; // uplink or downlink
+            const direction = parts[3]; 
             if (!trafficMap[email]) {
               trafficMap[email] = { email, uplink: 0, downlink: 0 };
             }
@@ -311,203 +283,150 @@ function fetchXrayStats(reset = true) {
           }
         });
       }
-
       resolve(Object.values(trafficMap));
     });
   });
 }
 
-async function reportCycle() {
-  try {
-    const userTraffic = await fetchXrayStats(true);
-    const systemStats = {
-      cpu_usage: getCpuUsage(),
-      mem_usage: getMemUsage(),
-      disk_usage: getDiskUsage(),
-      uptime: getUptime(),
-      os_type: getOsType(),
-      network: getNetworkSpeeds(),
-      version: DAEMON_VERSION
-    };
+// ------------------------------------------------------------
+// Crypto Utils
+// ------------------------------------------------------------
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'report',
-        system_stats: systemStats,
-        user_traffic: userTraffic
-      }));
+function encryptPayload(payload, secret) {
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  
+  const payloadStr = JSON.stringify({ ...payload, _ts: Date.now() });
+  let encrypted = cipher.update(payloadStr, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+  
+  return { encryptedData: encrypted, iv: iv.toString('hex'), authTag: authTag };
+}
+
+function decryptPayload(data, secret) {
+  try {
+    const { encryptedData, iv, authTag } = data;
+    if (!encryptedData || !iv || !authTag) return null;
+
+    const key = crypto.createHash('sha256').update(secret).digest();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'hex'));
+    decipher.setAuthTag(Buffer.from(authTag, 'hex'));
+
+    let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    
+    const payload = JSON.parse(decrypted);
+    if (Math.abs(Date.now() - payload._ts) > 60000) {
+      console.warn('[-] Payload timestamp expired');
+      return null;
     }
-  } catch (e) {
-    console.error("[-] Error in report cycle:", e.message);
+    return payload;
+  } catch (err) {
+    return null;
   }
 }
 
-const INTERVAL_PATH = '/etc/xray-daemon/interval.json';
-
-function startReportCycle(intervalSeconds) {
-  if (reportInterval) clearInterval(reportInterval);
-  const ms = intervalSeconds * 1000;
-  reportInterval = setInterval(reportCycle, ms);
-  console.log(`[Config] Heartbeat and report interval set to ${intervalSeconds} seconds.`);
-}
-
 // ------------------------------------------------------------
-// WebSocket Connection & Handshake
+// HTTP Server (Passive Node Mode)
 // ------------------------------------------------------------
 
-function connectWS() {
-  const timestamp = Date.now().toString();
-  const signature = crypto.createHmac('sha256', NODE_SECRET)
-    .update(NODE_ID + timestamp)
-    .digest('hex');
-
-  const wsUrl = `${CONTROLLER_URL}/api/node/ws?node_id=${encodeURIComponent(NODE_ID)}&timestamp=${timestamp}&signature=${signature}`;
-  console.log(`[WebSocket] Connecting to central controller at: ${CONTROLLER_URL}`);
-
-  ws = new WebSocket(wsUrl);
-
-  ws.on('open', () => {
-    console.log("[WebSocket] Connection established and authenticated successfully.");
-    reconnectDelay = 2000;
-    
-    // Request initial config sync
-    ws.send(JSON.stringify({ type: 'sync_request' }));
-
-    // Report stats immediately upon connection
-    reportCycle();
-
-    // Start periodic reporting
-    let interval = 30;
-    try {
-      if (fs.existsSync(INTERVAL_PATH)) {
-        interval = JSON.parse(fs.readFileSync(INTERVAL_PATH, 'utf8')).interval || 30;
-      }
-    } catch (e) {}
-    startReportCycle(interval);
-  });
-
-  ws.on('message', async (message) => {
-    try {
-      const payload = JSON.parse(message);
-      
-      if (payload.event === 'SYNC_RESPONSE') {
-        const inbounds = payload.data.inbounds || [];
-        const report_interval = payload.data.report_interval || 30;
-        console.log(`[WebSocket] Received SYNC_RESPONSE containing ${inbounds.length} inbounds.`);
+const server = http.createServer(async (req, res) => {
+  if (req.method === 'POST' && req.url === '/api/sync') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', async () => {
+      try {
+        const encryptedReq = JSON.parse(body);
+        const payload = decryptPayload(encryptedReq, NODE_SECRET);
         
-        try {
-          fs.writeFileSync(INTERVAL_PATH, JSON.stringify({ interval: report_interval }), 'utf8');
-        } catch (e) {
-          console.error("[-] Failed to save interval.json:", e.message);
+        if (!payload || payload.node_id !== String(NODE_ID)) {
+          console.warn('[-] Unauthorized request or malformed payload');
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Unauthorized' }));
         }
-        startReportCycle(report_interval);
-        
-        // 1. Process UFW rules for the new inbounds
-        const ports = inbounds.map(inb => inb.port);
-        await applyUfwRules(ports);
-        
-        // Write config
-        renderXrayConfig(inbounds, payload.data.config);
-        
-        if (payload.data.restart) {
+
+        // We fetch stats FIRST before making any changes, so we don't lose pre-restart traffic
+        const userTraffic = await fetchXrayStats(true);
+        const systemStats = getSystemStats();
+
+        // Process Action
+        if (payload.action === 'SYNC') {
+          console.log(`[API] Received SYNC command`);
+          const { inbounds, config, restart } = payload;
+          if (inbounds) {
+             const ports = inbounds.map(inb => inb.port);
+             await applyUfwRules(ports);
+             renderXrayConfig(inbounds, config);
+             if (restart) {
+               await restartXray();
+             }
+          }
+        } else if (payload.action === 'USER_ADD') {
+          const { email, uuid, inbounds } = payload;
+          console.log(`[API] Received USER_ADD for ${email}`);
+          for (const inb of (inbounds || [])) {
+            try {
+              const tmpFile = `/tmp/xray-adu-${uuid}-${inb.tag}.json`;
+              const apiPayload = {
+                inbounds: [{
+                  port: inb.port || 443, tag: inb.tag, protocol: inb.protocol || "vless",
+                  settings: { decryption: "none", clients: [{ id: uuid, email: email, level: 0, flow: inb.flow || "" }] }
+                }]
+              };
+              fs.writeFileSync(tmpFile, JSON.stringify(apiPayload));
+              await runCmd(`xray api adu -server=${XRAY_API_ADDRESS} ${tmpFile}`);
+              fs.unlinkSync(tmpFile);
+              console.log(`[Xray API] Added user ${email} to ${inb.tag}`);
+            } catch (e) {
+              console.error(`[-] Failed to add user ${email}:`, e.message);
+            }
+          }
+        } else if (payload.action === 'RESTART_XRAY') {
+          console.log(`[API] Received RESTART_XRAY command`);
           await restartXray();
-        } else {
-          console.log(`[Config] Skipped restart as requested by backend (silent sync).`);
-        }
-      } else if (payload.event === 'USER_ADD') {
-        const { email, uuid, inbounds } = payload.data;
-        console.log(`[WebSocket] Received USER_ADD for ${email}. Dynamically adding to ${inbounds?.length || 0} inbounds...`);
-        for (const inb of (inbounds || [])) {
+        } else if (payload.action === 'UPDATE_DAEMON') {
+          const { download_url } = payload;
+          console.log(`[API] Received UPDATE_DAEMON from ${download_url}`);
           try {
-            const tmpFile = `/tmp/xray-adu-${uuid}-${inb.tag}.json`;
-            const apiPayload = {
-              inbounds: [
-                {
-                  port: inb.port || 443,
-                  tag: inb.tag,
-                  protocol: inb.protocol || "vless",
-                  settings: {
-                    decryption: "none",
-                    clients: [
-                      {
-                        id: uuid,
-                        email: email,
-                        level: 0,
-                        flow: inb.flow || ""
-                      }
-                    ]
-                  }
-                }
-              ]
-            };
-            fs.writeFileSync(tmpFile, JSON.stringify(apiPayload));
-            await runCmd(`xray api adu -server=${XRAY_API_ADDRESS} ${tmpFile}`);
-            fs.unlinkSync(tmpFile);
-            console.log(`[Xray API] Successfully added user ${email} to inbound ${inb.tag}`);
+            await runCmd(`curl -sS -L -o /etc/xray-daemon/daemon.js ${download_url}/daemon.js`);
+            await runCmd(`curl -sS -L -o /etc/xray-daemon/xray.proto ${download_url}/xray.proto`);
+            console.log(`[Update] Daemon files updated successfully. Initiating self-restart...`);
+            
+            const responsePayload = { status: 'ok', message: 'Daemon updated successfully. Restarting...', system_stats: systemStats, user_traffic: userTraffic };
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(encryptPayload(responsePayload, NODE_SECRET)));
+            setTimeout(() => process.exit(0), 1000);
+            return;
           } catch (e) {
-            console.error(`[Xray API] Failed to add user ${email} to ${inb.tag}:`, e.message);
+             console.error(`[-] Update failed:`, e.message);
           }
         }
-        // Request silent configuration sync to persist changes
-        ws.send(JSON.stringify({ type: 'sync_request', restart: false }));
 
-      } else if (payload.event === 'USER_DEL') {
-        const { email, inbounds } = payload.data;
-        console.log(`[WebSocket] Received USER_DEL for ${email}. Triggering sync and restart.`);
-        // Report stats before losing the user's data completely
-        await reportCycle();
-        // For deletion, to ensure clean state and since it is rare, we request a full sync with restart
-        ws.send(JSON.stringify({ type: 'sync_request', restart: true }));
-      } else if (payload.event === 'FORCE_RELOAD') {
-        console.log(`[WebSocket] Received FORCE_RELOAD. Triggering hard reload...`);
-        await reportCycle();
-        ws.send(JSON.stringify({ type: 'sync_request', restart: true }));
-      } else if (payload.event === 'FORCE_REPORT') {
-        console.log(`[WebSocket] Received FORCE_REPORT. Triggering immediate report cycle.`);
-        await reportCycle();
-      } else if (payload.event === 'RESTART_XRAY') {
-        console.log(`[WebSocket] Received RESTART_XRAY. Executing restart...`);
-        await restartXray();
-      } else if (payload.event === 'UPDATE_DAEMON') {
-        console.log(`[WebSocket] Received UPDATE_DAEMON. Downloading latest daemon files...`);
-        try {
-          const httpUrl = CONTROLLER_URL.replace('wss://', 'https://').replace('ws://', 'http://');
-          await runCmd(`curl -sS -L -o /etc/xray-daemon/daemon.js ${httpUrl}/daemon.js`);
-          await runCmd(`curl -sS -L -o /etc/xray-daemon/xray.proto ${httpUrl}/xray.proto`);
-          console.log(`[WebSocket] Daemon files updated successfully. Initiating self-restart...`);
-          // Send acknowledgment back before dying
-          ws.send(JSON.stringify({ type: 'sync_log', message: 'Daemon updated successfully. Restarting...' }));
-          // Exit so systemd can restart the process with new code
-          setTimeout(() => process.exit(0), 1000);
-        } catch (updateErr) {
-          console.error(`[WebSocket] Failed to update daemon:`, updateErr.message);
-          ws.send(JSON.stringify({ type: 'sync_log', message: `Update failed: ${updateErr.message}` }));
-        }
+        // Return current stats as ACK
+        const responsePayload = {
+           status: 'ok',
+           system_stats: systemStats,
+           user_traffic: userTraffic
+        };
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(encryptPayload(responsePayload, NODE_SECRET)));
+
+      } catch (err) {
+        console.error('[-] Error processing request:', err.message);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
       }
-    } catch (e) {
-      console.error("[-] Failed to process WS message:", e.message);
-    }
-  });
+    });
+  } else {
+    // Silent drop
+    res.writeHead(404);
+    res.end();
+  }
+});
 
-  ws.on('close', (code, reason) => {
-    console.log(`[WebSocket] Connection closed (code: ${code}, reason: ${reason || 'no reason'}). Reconnecting...`);
-    handleReconnect();
-  });
-
-  ws.on('error', (err) => {
-    console.error("[WebSocket] Socket error:", err.message);
-  });
-}
-
-function handleReconnect() {
-  if (reportInterval) clearInterval(reportInterval);
-  ws = null;
-  setTimeout(() => {
-    connectWS();
-    // Exponential backoff up to 60s
-    reconnectDelay = Math.min(reconnectDelay * 2, 60000);
-  }, reconnectDelay);
-}
-
-// Start connection
-connectWS();
+server.listen(DAEMON_PORT, '0.0.0.0', () => {
+  console.log(`[+] Xray Daemon Server started on 0.0.0.0:${DAEMON_PORT} in passive mode.`);
+});

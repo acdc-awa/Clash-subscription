@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff, Database, Download, Upload, Terminal, CloudDownload } from 'lucide-react';
+import { Sun, Moon, Monitor, HardDrive, Cpu, MemoryStick, Activity, Server, ActivitySquare, ClipboardCopy, Edit2, Trash2, Menu, Eye, EyeOff, Database, Download, Upload, Terminal, Key, CloudDownload } from 'lucide-react';
 import './App.css';
 
 // ------------------------------------------------------------
@@ -488,8 +488,9 @@ function NodeCard({ node, formatTraffic, actions }) {
               <span>• 版本: {node.daemon_version || '未知'}</span>
               <span>• Uptime: {Math.floor((node.uptime || 0) / 86400)}d</span>
               {node.last_sync && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: node.last_sync.status === 'success' ? '#10b981' : '#ef4444', marginLeft: 'auto', background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px' }}>
-                  {node.last_sync.status === 'success' ? '✅' : '❌'} {new Date(node.last_sync.timestamp * 1000).toLocaleTimeString('zh-CN')}
+                <span title={node.last_sync.message} style={{ display: 'flex', alignItems: 'center', gap: '4px', color: node.last_sync.status === 'SYNC_OK' ? '#10b981' : '#ef4444', marginLeft: 'auto', background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px', cursor: 'help' }}>
+                  {node.last_sync.status === 'SYNC_OK' ? '✅' : '❌'} {new Date(node.last_sync.timestamp * 1000).toLocaleTimeString('zh-CN')}
+                  {node.last_sync.status === 'AUTH_FAILED' && <span style={{fontSize: '0.7rem', color: '#fbbf24', marginLeft: '2px'}}>(密钥错误)</span>}
                 </span>
               )}
             </div>
@@ -1602,7 +1603,7 @@ function AdminDashboard() {
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem', marginTop: '1.5rem' }}>
                 {nodes.map(n => {
-                  const installCmd = `curl -sS https://${window.location.host}/install.sh | sudo bash -s -- --url wss://${window.location.host} --node ${n.id} --token ${n.secret || 'node-secret'}`;
+                  const installCmd = `curl -sS https://${window.location.host}/install.sh | sudo bash -s -- --url http://${window.location.host} --node ${n.id} --token ${n.secret || 'node-secret'}`;
                   return (
                     <div key={n.id}>
                       <NodeCard 
@@ -1615,7 +1616,12 @@ function AdminDashboard() {
                               showToast('一键部署命令已复制', 'success');
                             }}><ClipboardCopy size={16} /></button>
                             <button className="btn-icon" title="查看推送日志" onClick={() => handleOpenNodeLogsModal(n)}><Terminal size={16} /></button>
-                            <button className="btn-icon" title="升级节点端" onClick={() => handleUpdateDaemon(n.id)}><CloudDownload size={16} /></button>
+                            <button className="btn-icon" title="重置密钥命令" onClick={() => {
+                              const resetCmd = `curl -sS ${window.location.protocol}//${window.location.host}/update-secret.sh | sudo bash -s -- ${n.secret}`;
+                              navigator.clipboard.writeText(resetCmd);
+                              showToast('重置密钥命令已复制', 'success');
+                            }}><Key size={16} /></button>
+                            <button className="btn-icon" title="升级/重启节点端" onClick={() => handleUpdateDaemon(n.id)}><CloudDownload size={16} /></button>
                             <button className="btn-icon" title="编辑" onClick={() => handleOpenNodeModal(n)}><Edit2 size={16} /></button>
                             <button className="btn-icon danger" title="删除" onClick={() => handleDeleteNode(n.id)}><Trash2 size={16} /></button>
                           </>

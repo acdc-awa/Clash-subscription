@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const http = require('http');
-const WebSocket = require('ws');
+
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -50,12 +50,76 @@ if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
 app.use(cors());
 app.use(express.json());
 
-// Map to store active node WebSocket connections (nodeId -> WebSocket)
-const activeNodes = new Map();
+const { encryptPayload, decryptPayload } = require('./crypto_util');
 
-// Helper to push user modification event to active nodes
+// Helper to make HTTP POST to node
+function syncNodeToDaemon(nodeId, action, extraPayload = {}) {
+  return new Promise((resolve, reject) => {
+    try {
+      const node = db.prepare('SELECT server, secret FROM nodes WHERE id = ?').get(nodeId);
+      if (!node || !node.server || !node.secret) return resolve(null);
+      
+      const payload = { action, node_id: String(nodeId), ...extraPayload };
+      const encrypted = encryptPayload(payload, node.secret);
+      const postData = JSON.stringify(encrypted);
+      
+      const targetUrl = new URL(`http://${node.server}:3000/api/sync`);
+      const req = require('http').request(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+        timeout: 5000
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          if (res.statusCode === 401) {
+             db.prepare('UPDATE node_sync_logs SET status = ?, message = ?, timestamp = ? WHERE node_id = ?').run('AUTH_FAILED', 'Auth failed: Secret mismatch', Math.floor(Date.now() / 1000), nodeId);
+             return resolve(null);
+          }
+          if (res.statusCode !== 200) return resolve(null);
+          try {
+            const decrypted = decryptPayload(JSON.parse(body), node.secret);
+            resolve(decrypted);
+          } catch(e) { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.write(postData);
+      req.end();
+    } catch(err) {
+      resolve(null);
+    }
+  });
+}
+
+function triggerNodeConfigReload(nodeId) {
+   syncNodeToDaemon(nodeId, 'SYNC', getFullNodeConfig(nodeId, true));
+}
+
+function pushUserAddtoNode(nodeId, email, userUuid) {
+   const inbounds = db.prepare(`
+      SELECT DISTINCT i.port, i.network, i.security, i.tag FROM inbounds i
+      JOIN package_inbounds pi ON i.id = pi.inbound_id
+      JOIN users u ON u.package_id = pi.package_id
+      WHERE i.node_id = ? AND u.uuid = ?
+      UNION
+      SELECT DISTINCT i.port, i.network, i.security, i.tag FROM inbounds i
+      JOIN package_aliases pa ON i.id = pa.inbound_id
+      JOIN users u ON u.package_id = pa.package_id
+      WHERE i.node_id = ? AND u.uuid = ?
+   `).all(nodeId, userUuid, nodeId, userUuid);
+   
+   const inboundDetails = inbounds.map(inb => ({
+      tag: `${nodeId}_${inb.port}`,
+      port: inb.port,
+      protocol: 'vless',
+      flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : ''
+   }));
+   syncNodeToDaemon(nodeId, 'USER_ADD', { email, uuid: userUuid, inbounds: inboundDetails });
+}
+
 function pushUserEventToAllowedNodes(userUuid, email, eventType) {
-  try {
     const allowedNodeRows = db.prepare(`
       SELECT DISTINCT i.node_id FROM package_inbounds pi
       JOIN inbounds i ON pi.inbound_id = i.id
@@ -66,83 +130,110 @@ function pushUserEventToAllowedNodes(userUuid, email, eventType) {
       JOIN inbounds i ON pa.inbound_id = i.id
       JOIN users u ON u.package_id = pa.package_id
       WHERE u.uuid = ?
-    `).all(userUuid);
-    const nodeIds = allowedNodeRows.map(r => r.node_id);
+    `).all(userUuid, userUuid);
     
-    for (const nodeId of nodeIds) {
-      const ws = activeNodes.get(nodeId);
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        // Fetch inbound details for the user on this node
-        const inbounds = db.prepare(`
-          SELECT DISTINCT i.port, i.network, i.security FROM inbounds i
-          JOIN package_inbounds pi ON i.id = pi.inbound_id
-          JOIN users u ON u.package_id = pi.package_id
-          WHERE i.node_id = ? AND u.uuid = ?
-          UNION
-          SELECT DISTINCT i.port, i.network, i.security FROM inbounds i
-          JOIN package_aliases pa ON i.id = pa.inbound_id
-          JOIN users u ON u.package_id = pa.package_id
-          WHERE i.node_id = ? AND u.uuid = ?
-        `).all(nodeId, userUuid);
-        const inboundDetails = inbounds.map(inb => ({
-          tag: `${nodeId}_${inb.port}`,
-          port: inb.port,
-          protocol: 'vless',
-          flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : ''
-        }));
-
+    for (const row of allowedNodeRows) {
         if (eventType === 'USER_ADD') {
-          ws.send(JSON.stringify({ event: 'USER_ADD', data: { email, uuid: userUuid, inbounds: inboundDetails } }));
+           pushUserAddtoNode(row.node_id, email, userUuid);
         } else if (eventType === 'USER_DEL') {
-          ws.send(JSON.stringify({ event: 'USER_DEL', data: { email, inbounds: inboundDetails } }));
+           triggerNodeConfigReload(row.node_id);
         }
-      }
     }
-  } catch (err) {
-    console.error('Failed to push user event to nodes:', err);
-  }
 }
 
-// Helper to push user addition to specific node
-function pushUserAddtoNode(nodeId, email, userUuid) {
-  const ws = activeNodes.get(nodeId);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    const inbounds = db.prepare(`
-      SELECT DISTINCT i.port, i.network, i.security FROM inbounds i
-      JOIN package_inbounds pi ON i.id = pi.inbound_id
-      JOIN users u ON u.package_id = pi.package_id
-      WHERE i.node_id = ? AND u.uuid = ?
-      UNION
-      SELECT DISTINCT i.port, i.network, i.security FROM inbounds i
-      JOIN package_aliases pa ON i.id = pa.inbound_id
-      JOIN users u ON u.package_id = pa.package_id
-      WHERE i.node_id = ? AND u.uuid = ?
-    `).all(nodeId, userUuid);
-    const inboundDetails = inbounds.map(inb => ({
-      tag: `${nodeId}_${inb.port}`,
-      flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : ''
-    }));
-    ws.send(JSON.stringify({ event: 'USER_ADD', data: { email, uuid: userUuid, inbounds: inboundDetails } }));
-  }
+// Helper to generate full node config payload
+function getFullNodeConfig(nodeId, restart = false) {
+    const nodeRecord = db.prepare('SELECT advanced_config FROM nodes WHERE id = ?').get(nodeId);
+    let advConfig = {};
+    if (nodeRecord && nodeRecord.advanced_config) {
+      try { advConfig = JSON.parse(nodeRecord.advanced_config); } catch {}
+    }
+
+    const inbounds = db.prepare('SELECT * FROM inbounds WHERE node_id = ?').all(nodeId);
+    
+    const xrayInbounds = inbounds.map(inb => {
+      let inbConfig = {};
+      try { inbConfig = JSON.parse(inb.config); } catch {}
+      
+      const inboundUsers = db.prepare(`
+        SELECT u.email, u.uuid FROM users u
+        JOIN package_inbounds pi ON u.package_id = pi.package_id
+        WHERE pi.inbound_id = ? AND u.status = 'active'
+      `).all(inb.id);
+      
+      const clientList = inboundUsers.map(u => ({
+        id: u.uuid,
+        flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : '',
+        email: u.email,
+        level: 0
+      }));
+
+      const xrayInb = {
+        port: inb.port,
+        protocol: inb.protocol,
+        tag: `${inb.node_id}_${inb.port}`,
+        settings: { clients: clientList, decryption: "none" },
+        streamSettings: { network: inb.network, security: inb.security }
+      };
+
+      if (inb.security === 'reality') {
+        xrayInb.streamSettings.realitySettings = {
+          show: false,
+          dest: inbConfig.dest || "www.microsoft.com:443",
+          serverNames: inbConfig.serverNames || ["www.microsoft.com"],
+          privateKey: inbConfig.privateKey || "",
+          shortIds: inbConfig.shortIds || [""]
+        };
+      } else if (inb.security === 'tls') {
+        xrayInb.streamSettings.tlsSettings = { certificates: inbConfig.certificates || [] };
+      }
+
+      if (inb.network === 'grpc') {
+        xrayInb.streamSettings.grpcSettings = { serviceName: inbConfig.serviceName || "grpc-service" };
+      } else if (inb.network === 'xhttp') {
+        xrayInb.streamSettings.xhttpSettings = { path: inbConfig.path || "/xh", host: inbConfig.host || "", mode: inbConfig.mode || "stream-one" };
+      }
+      return xrayInb;
+    });
+
+    const apiInbound = {
+      listen: "127.0.0.1", port: 10085, protocol: "dokodemo-door",
+      settings: { address: "127.0.0.1" }, tag: "api-in"
+    };
+
+    const fullConfig = {
+      log: { loglevel: "warning" },
+      api: { tag: "api", services: ["HandlerService", "StatsService"] },
+      stats: {},
+      policy: {
+        levels: { "0": { statsUserUplink: true, statsUserDownlink: true } },
+        system: { statsInboundUplink: true, statsInboundDownlink: true }
+      },
+      inbounds: [...xrayInbounds, apiInbound],
+      outbounds: [
+        { protocol: "freedom", tag: "direct" },
+        { protocol: "blackhole", tag: "blocked" }
+      ],
+      routing: { rules: [{ inboundTag: ["api-in"], outboundTag: "api", type: "field" }] }
+    };
+
+    if (advConfig.enable_sniffing) {
+      fullConfig.inbounds.forEach(inb => {
+        if (inb.tag !== "api-in") {
+          inb.sniffing = { enabled: true, destOverride: ["http", "tls", "quic", "fakedns"] };
+        }
+      });
+    }
+    if (advConfig.block_bittorrent) {
+      fullConfig.routing.rules.push({ protocol: ["bittorrent"], outboundTag: "blocked", type: "field" });
+    }
+    if (advConfig.block_private) {
+      fullConfig.routing.rules.push({ ip: ["geoip:private"], outboundTag: "blocked", type: "field" });
+    }
+
+    return { inbounds: xrayInbounds, config: fullConfig, restart };
 }
 
-// Helper to push user deletion to specific node
-function pushUserDelFromNode(nodeId, email) {
-  const ws = activeNodes.get(nodeId);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ event: 'USER_DEL', data: { email } }));
-  }
-}
-
-// Helper to trigger config reload on a node
-function triggerNodeConfigReload(nodeId) {
-  const ws = activeNodes.get(nodeId);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ event: 'FORCE_RELOAD' }));
-  }
-}
-
-// ------------------------------------------------------------
 // Middlewares
 // ------------------------------------------------------------
 
@@ -368,7 +459,7 @@ app.get('/api/user/nodes', authenticate, (req, res) => {
       return {
         ...node,
         inbounds_count: inboundsCount,
-        online: activeNodes.has(node.id),
+        online: true,
         cpu_usage: stats ? stats.cpu_usage : 0,
         mem_usage: stats ? stats.mem_usage : 0,
         disk_usage: stats ? stats.disk_usage : 0,
@@ -406,7 +497,7 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
         total_traffic: r.total_traffic || 0,
         advanced_config: r.advanced_config ? JSON.parse(r.advanced_config) : {},
         inbounds_count: inboundsCount,
-        online: activeNodes.has(r.id),
+        online: lastSync && lastSync.status === 'SYNC_OK' && (Math.floor(Date.now() / 1000) - lastSync.timestamp < 120),
         cpu_usage: stats ? stats.cpu_usage : 0,
         mem_usage: stats ? stats.mem_usage : 0,
         disk_usage: stats ? stats.disk_usage : 0,
@@ -415,7 +506,7 @@ app.get('/api/nodes', authenticate, requireAdmin, (req, res) => {
         online_users: stats ? stats.online_users : 0,
         network_rx: stats ? stats.network_rx : 0,
         network_tx: stats ? stats.network_tx : 0,
-        daemon_version: activeNodes.has(r.id) ? activeNodes.get(r.id).daemon_version : null,
+        daemon_version: 'v1.0.0',
         last_sync: lastSync ? { status: lastSync.status, timestamp: lastSync.timestamp, message: lastSync.message } : null
       };
     });
@@ -534,19 +625,12 @@ app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
   }
 });
 
-app.post('/api/nodes/force-report', authenticate, requireAdmin, (req, res) => {
-  try {
-    let count = 0;
-    for (const [id, ws] of activeNodes.entries()) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ event: 'FORCE_REPORT' }));
-        count++;
-      }
-    }
-    res.json({ success: true, count });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+app.post('/api/nodes/force-report', async (req, res) => {
+  const nodes = db.prepare('SELECT id FROM nodes').all();
+  for (const node of nodes) {
+    syncNodeToDaemon(node.id, 'FETCH_STATS');
   }
+  res.json({ message: 'Poll request dispatched to all nodes' });
 });
 
 app.post('/api/nodes/report-interval', authenticate, requireAdmin, (req, res) => {
@@ -1671,395 +1755,131 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 
+
 // ------------------------------------------------------------
-// HTTP Server & WebSocket Server Initialization
+// HTTP Server & Polling Engine (Passive Node Mode)
 // ------------------------------------------------------------
 
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ noServer: true });
+const server = require('http').createServer(app);
 
-// Upgrade HTTP request to WebSocket for Xray node daemons
-server.on('upgrade', (request, socket, head) => {
-  const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
-  if (pathname === '/api/node/ws') {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
-    });
-  } else {
-    socket.destroy();
+// Traffic Processor
+function processNodeTraffic(nodeId, nodeMultiplier, user_traffic, system_stats) {
+  // 1. Process system logs
+  if (system_stats) {
+    const statsId = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    db.prepare(`
+      INSERT INTO node_stats (id, node_id, timestamp, cpu_usage, mem_usage, disk_usage, uptime, os_type, network_rx, network_tx, online_users)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      statsId, nodeId, Math.floor(Date.now() / 1000),
+      system_stats.cpu_usage || 0, system_stats.mem_usage || 0,
+      system_stats.disk_usage || 0, system_stats.uptime || 0,
+      system_stats.os_type || 'Linux',
+      system_stats.network ? system_stats.network.rx_speed || 0 : 0,
+      system_stats.network ? system_stats.network.tx_speed || 0 : 0,
+      user_traffic ? user_traffic.length : 0
+    );
+    
+    // Truncate historic logs
+    db.prepare(`
+      DELETE FROM node_stats 
+      WHERE node_id = ? AND timestamp < (
+        SELECT timestamp FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1 OFFSET 100
+      )
+    `).run(nodeId, nodeId);
   }
-});
-
-wss.on('connection', (ws, request) => {
-  const urlObj = new URL(request.url, `http://${request.headers.host}`);
-  const nodeId = urlObj.searchParams.get('node_id');
-  const timestamp = urlObj.searchParams.get('timestamp');
-  const signature = urlObj.searchParams.get('signature');
-
-  if (!nodeId || !timestamp || !signature) {
-    ws.close(4001, '认证失败：缺少签名安全参数');
-    return;
-  }
-
-  // Check timestamp offset (strict 30-second window)
-  const timeDiff = Math.abs(Date.now() - parseInt(timestamp));
-  if (isNaN(timeDiff) || timeDiff > 30000) {
-    ws.close(4002, '认证失败：请求超时 (Out of sync)');
-    return;
-  }
-
-  // Retrieve node to obtain secret
-  const nodeRow = db.prepare('SELECT secret, multiplier FROM nodes WHERE id = ?').get(nodeId);
-  if (!nodeRow) {
-    ws.close(4003, '认证失败：节点未在主控注册');
-    return;
-  }
-
-  const nodeSecret = nodeRow.secret;
-  if (!nodeSecret) {
-    ws.close(4005, '认证失败：节点密钥未配置');
-    return;
-  }
-  const nodeMultiplier = nodeRow.multiplier !== undefined ? nodeRow.multiplier : 1.0;
-
-  // Verify HMAC signature
-  const expectedSig = crypto.createHmac('sha256', nodeSecret)
-    .update(nodeId + timestamp)
-    .digest('hex');
-
-  if (signature !== expectedSig) {
-    ws.close(4004, '认证失败：HMAC 签名不匹配');
-    return;
-  }
-
-  // Connection Approved!
-  console.log(`[WebSocket] Node Daemon "${nodeId}" connected and authenticated.`);
-
-  // 如果存在旧连接，主动关闭避免竞态
-  const oldWs = activeNodes.get(nodeId);
-  if (oldWs && oldWs !== ws && oldWs.readyState === WebSocket.OPEN) {
-    oldWs.close(4000, '新的守护进程连接已建立');
-  }
-  activeNodes.set(nodeId, ws);
-  ws._isAlive = true;
-  ws.on('pong', () => { ws._isAlive = true; });
-
-  ws.on('message', (message) => {
-    try {
-      const payload = JSON.parse(message);
-      
-      if (payload.type === 'sync_ack') {
-        const ackId = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        db.prepare(`
-          INSERT INTO node_sync_logs (id, node_id, action, status, message, timestamp)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).run(
-          ackId, 
-          nodeId, 
-          payload.action || 'unknown', 
-          payload.status || 'unknown', 
-          payload.message || '', 
-          payload.timestamp || Math.floor(Date.now() / 1000)
-        );
-        console.log(`[WebSocket] Received sync_ack from node ${nodeId} for action ${payload.action}: ${payload.status}`);
-        return;
-      }
-      
-      if (payload.type === 'report') {
-        const { system_stats, user_traffic } = payload;
-        
-        // 1. Process system logs
-        if (system_stats) {
-          if (system_stats.version) {
-            ws.daemon_version = system_stats.version;
-          }
-          const statsId = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-          db.prepare(`
-            INSERT INTO node_stats (id, node_id, timestamp, cpu_usage, mem_usage, disk_usage, uptime, os_type, network_rx, network_tx, online_users)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            statsId,
-            nodeId,
-            Math.floor(Date.now() / 1000),
-            system_stats.cpu_usage || 0,
-            system_stats.mem_usage || 0,
-            system_stats.disk_usage || 0,
-            system_stats.uptime || 0,
-            system_stats.os_type || 'Linux',
-            system_stats.network ? system_stats.network.rx_speed || 0 : 0,
-            system_stats.network ? system_stats.network.tx_speed || 0 : 0,
-            user_traffic ? user_traffic.length : 0
-          );
-          
-          // Truncate historic logs to keep only last 100 items per node
-          db.prepare(`
-            DELETE FROM node_stats 
-            WHERE node_id = ? AND timestamp < (
-              SELECT timestamp FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1 OFFSET 100
-            )
-          `).run(nodeId, nodeId);
-        }
-        
-        // 2. Aggregate user traffic delta and check quota limits
-        if (Array.isArray(user_traffic)) {
-          db.transaction(() => {
-            for (const tLog of user_traffic) {
-              const { email, uplink, downlink } = tLog;
-              const rawDelta = (uplink || 0) + (downlink || 0);
-              
-              if (rawDelta > 0) {
-                const today = new Date().toISOString().split('T')[0];
-                
-                // Update daily traffic for node
-                db.prepare(`
-                  INSERT INTO daily_traffic (date, type, target_id, traffic)
-                  VALUES (?, 'node', ?, ?)
-                  ON CONFLICT(date, type, target_id) DO UPDATE SET traffic = traffic + excluded.traffic
-                `).run(today, nodeId, rawDelta);
-
-                // Update total traffic for node
-                db.prepare(`UPDATE nodes SET total_traffic = total_traffic + ? WHERE id = ?`).run(rawDelta, nodeId);
-
-                // Apply node traffic multiplier
-                const delta = Math.round(rawDelta * nodeMultiplier);
-
-                const user = db.prepare(`
-                  SELECT u.uuid, u.package_id, u.expiry_time, u.activation_time, u.used_traffic, u.status, p.traffic as total_traffic, p.duration_days, p.expiration_policy
-                  FROM users u
-                  LEFT JOIN packages p ON u.package_id = p.id
-                  WHERE u.email = ?
-                `).get(email);
-
-                if (user) {
-                  // 检查用户是否已过期（时间维度）
-                  if (user.expiry_time && user.expiry_time <= new Date().toISOString().split('T')[0]) {
-                    if (user.status === 'active') {
-                      db.prepare("UPDATE users SET status = 'expired' WHERE email = ?").run(email);
-                      console.log(`[WebSocket] User ${email} expired (past expiry_time). Status set to expired.`);
-                    }
-                    continue;
-                  }
-
-                  let finalExpiry = user.expiry_time;
-                  let finalActivation = user.activation_time;
-
-                  // Handle 'first_use' activation logic
-                  if (user.package_id && user.expiration_policy === 'first_use' && !user.activation_time) {
-                    const now = new Date();
-                    finalActivation = now.toISOString();
-                    now.setDate(now.getDate() + user.duration_days);
-                    finalExpiry = now.toISOString().split('T')[0];
-
-                    db.prepare('UPDATE users SET activation_time = ?, expiry_time = ? WHERE email = ?')
-                      .run(finalActivation, finalExpiry, email);
-                    console.log(`[WebSocket] First use activation for user ${email}. Expiry set to ${finalExpiry}`);
-                  }
-
-                  db.prepare('UPDATE users SET used_traffic = used_traffic + ? WHERE email = ?')
-                    .run(delta, email);
-                  
-                  db.prepare(`
-                    INSERT INTO daily_traffic (date, type, target_id, traffic)
-                    VALUES (?, 'user', ?, ?)
-                    ON CONFLICT(date, type, target_id) DO UPDATE SET traffic = traffic + excluded.traffic
-                  `).run(today, email, delta);
-
-                  const updatedUsed = user.used_traffic + delta;
-                  const limit = user.total_traffic || 0;
-
-                  if (user.status === 'active' && limit > 0 && updatedUsed >= limit) {
-                    console.log(`[WebSocket] User ${email} has run out of traffic (${updatedUsed} >= ${limit}). Revoking access dynamically...`);
-                    db.prepare("UPDATE users SET status = 'expired' WHERE email = ?").run(email);
-                    
-                    // 向用户有权访问的节点推送踢出事件
-                    pushUserEventToAllowedNodes(user.uuid, email, 'USER_DEL');
-                  }
-                }
-              }
-            }
-          })();
-        }
-      } else if (payload.type === 'sync_request') {
-        // Fetch node advanced config
-        const nodeRecord = db.prepare('SELECT advanced_config FROM nodes WHERE id = ?').get(nodeId);
-        let advConfig = {};
-        if (nodeRecord && nodeRecord.advanced_config) {
-          try { advConfig = JSON.parse(nodeRecord.advanced_config); } catch {}
-        }
-
-        const inbounds = db.prepare('SELECT * FROM inbounds WHERE node_id = ?').all(nodeId);
-        
-        // Render Xray config.json compatible structure
-        const xrayInbounds = inbounds.map(inb => {
-          let inbConfig = {};
-          try { inbConfig = JSON.parse(inb.config); } catch {}
-          
-          const inboundUsers = db.prepare(`
-            SELECT u.email, u.uuid FROM users u
-            JOIN package_inbounds pi ON u.package_id = pi.package_id
-            WHERE pi.inbound_id = ? AND u.status = 'active'
-          `).all(inb.id);
-          
-          const clientList = inboundUsers.map(u => ({
-            id: u.uuid,
-            flow: inb.network === 'tcp' && inb.security === 'reality' ? 'xtls-rprx-vision' : '',
-            email: u.email,
-            level: 0
-          }));
-
-          const xrayInb = {
-            port: inb.port,
-            protocol: inb.protocol,
-            tag: `${inb.node_id}_${inb.port}`,
-            settings: {
-              clients: clientList,
-              decryption: "none"
-            },
-            streamSettings: {
-              network: inb.network,
-              security: inb.security
-            }
-          };
-
-          if (inb.security === 'reality') {
-            xrayInb.streamSettings.realitySettings = {
-              show: false,
-              dest: inbConfig.dest || "www.microsoft.com:443",
-              serverNames: inbConfig.serverNames || ["www.microsoft.com"],
-              privateKey: inbConfig.privateKey || "",
-              shortIds: inbConfig.shortIds || [""]
-            };
-          } else if (inb.security === 'tls') {
-            xrayInb.streamSettings.tlsSettings = {
-              certificates: inbConfig.certificates || []
-            };
-          }
-
-          if (inb.network === 'grpc') {
-            xrayInb.streamSettings.grpcSettings = {
-              serviceName: inbConfig.serviceName || "grpc-service"
-            };
-          } else if (inb.network === 'xhttp') {
-            xrayInb.streamSettings.xhttpSettings = {
-              path: inbConfig.path || "/xh",
-              host: inbConfig.host || "",
-              mode: inbConfig.mode || "stream-one"
-            };
-          }
-
-          return xrayInb;
-        });
-
-        // Add API inbound for daemon communication
-        const apiInbound = {
-          listen: "127.0.0.1",
-          port: 10085,
-          protocol: "dokodemo-door",
-          settings: { address: "127.0.0.1" },
-          tag: "api-in"
-        };
-
-        const fullConfig = {
-          log: { loglevel: "warning" },
-          api: {
-            tag: "api",
-            services: ["HandlerService", "StatsService"]
-          },
-          stats: {},
-          policy: {
-            levels: { "0": { statsUserUplink: true, statsUserDownlink: true } },
-            system: { statsInboundUplink: true, statsInboundDownlink: true }
-          },
-          inbounds: [...xrayInbounds, apiInbound],
-          outbounds: [
-            { protocol: "freedom", tag: "direct" },
-            { protocol: "blackhole", tag: "blocked" }
-          ],
-          routing: {
-            rules: [
-              { inboundTag: ["api-in"], outboundTag: "api", type: "field" }
-            ]
-          }
-        };
-
-        // Apply advanced configurations
-        if (advConfig.enable_sniffing) {
-          fullConfig.inbounds.forEach(inb => {
-            if (inb.tag !== "api-in") {
-              inb.sniffing = {
-                enabled: true,
-                destOverride: ["http", "tls", "quic", "fakedns"]
-              };
-            }
-          });
-        }
-        if (advConfig.block_bittorrent) {
-          fullConfig.routing.rules.push({
-            protocol: ["bittorrent"],
-            outboundTag: "blocked",
-            type: "field"
-          });
-        }
-        if (advConfig.block_private) {
-          fullConfig.routing.rules.push({
-            ip: ["geoip:private"],
-            outboundTag: "blocked",
-            type: "field"
-          });
-        }
-
-        ws.send(JSON.stringify({
-          event: 'SYNC_RESPONSE',
-          data: {
-            inbounds: xrayInbounds, // For daemon UFW processing
-            config: fullConfig,     // Complete ready-to-write JSON config
-            restart: payload.restart !== false, // default to true if not strictly false
-            report_interval: advConfig.report_interval ? Number(advConfig.report_interval) : 30
-          }
-        }));
-      }
-    } catch (e) {
-      console.error(`[WebSocket] Failed to parse message from node "${nodeId}":`, e);
-    }
-  });
-
-  ws.on('close', () => {
-    console.log(`[WebSocket] Node Daemon "${nodeId}" disconnected.`);
-    // 只有当 Map 中存的仍然是当前 ws 时才删除，避免误删重连后的新连接
-    if (activeNodes.get(nodeId) === ws) {
-      activeNodes.delete(nodeId);
-    }
-  });
   
-  ws.on('error', (err) => {
-    console.error(`[WebSocket] Error in node "${nodeId}":`, err);
-    if (activeNodes.get(nodeId) === ws) {
-      activeNodes.delete(nodeId);
-    }
-  });
-});
+  // 2. Aggregate user traffic delta
+  if (Array.isArray(user_traffic)) {
+    db.transaction(() => {
+      for (const tLog of user_traffic) {
+        const { email, uplink, downlink } = tLog;
+        const rawDelta = (uplink || 0) + (downlink || 0);
+        
+        if (rawDelta > 0) {
+          const today = new Date().toISOString().split('T')[0];
+          
+          db.prepare(`
+            INSERT INTO daily_traffic (date, type, target_id, traffic)
+            VALUES (?, 'node', ?, ?)
+            ON CONFLICT(date, type, target_id) DO UPDATE SET traffic = traffic + excluded.traffic
+          `).run(today, nodeId, rawDelta);
 
+          db.prepare(`UPDATE nodes SET total_traffic = total_traffic + ? WHERE id = ?`).run(rawDelta, nodeId);
 
-server.listen(PORT, () => {
-  console.log(`VPS Clash Subscription Controller backend listening on port ${PORT}`);
-});
+          const delta = Math.round(rawDelta * nodeMultiplier);
 
-// WebSocket 心跳检测（每 30 秒 ping 一次，超时则强制断开僵尸连接）
-const heartbeatInterval = setInterval(() => {
-  for (const [hbNodeId, clientWs] of activeNodes.entries()) {
-    if (clientWs._isAlive === false) {
-      console.log(`[Heartbeat] Node "${hbNodeId}" heartbeat timeout, terminating connection.`);
-      clientWs.terminate();
-      continue;
-    }
-    clientWs._isAlive = false;
-    clientWs.ping();
+          const user = db.prepare(`
+            SELECT u.uuid, u.package_id, u.expiry_time, u.activation_time, u.used_traffic, u.status, p.traffic as total_traffic, p.duration_days, p.expiration_policy
+            FROM users u
+            LEFT JOIN packages p ON u.package_id = p.id
+            WHERE u.email = ?
+          `).get(email);
+
+          if (user) {
+            if (user.expiry_time && user.expiry_time <= new Date().toISOString().split('T')[0]) {
+              if (user.status === 'active') {
+                db.prepare("UPDATE users SET status = 'expired' WHERE email = ?").run(email);
+              }
+              continue;
+            }
+
+            let finalExpiry = user.expiry_time;
+            let finalActivation = user.activation_time;
+
+            if (user.package_id && user.expiration_policy === 'first_use' && !user.activation_time) {
+              const now = new Date();
+              finalActivation = now.toISOString();
+              now.setDate(now.getDate() + user.duration_days);
+              finalExpiry = now.toISOString().split('T')[0];
+              db.prepare('UPDATE users SET activation_time = ?, expiry_time = ? WHERE email = ?').run(finalActivation, finalExpiry, email);
+            }
+
+            db.prepare('UPDATE users SET used_traffic = used_traffic + ? WHERE email = ?').run(delta, email);
+            
+            db.prepare(`
+              INSERT INTO daily_traffic (date, type, target_id, traffic)
+              VALUES (?, 'user', ?, ?)
+              ON CONFLICT(date, type, target_id) DO UPDATE SET traffic = traffic + excluded.traffic
+            `).run(today, email, delta);
+
+            const updatedUsed = user.used_traffic + delta;
+            const limit = user.total_traffic || 0;
+
+            if (user.status === 'active' && limit > 0 && updatedUsed >= limit) {
+              db.prepare("UPDATE users SET status = 'expired' WHERE email = ?").run(email);
+              pushUserEventToAllowedNodes(user.uuid, email, 'USER_DEL');
+            }
+          }
+        }
+      }
+    })();
   }
-}, 30000);
+}
 
-wss.on('close', () => clearInterval(heartbeatInterval));
+// Polling Scheduler Loop
+const POLLING_INTERVAL = 30000; // 30 seconds
+setInterval(async () => {
+  const nodes = db.prepare('SELECT id, multiplier FROM nodes').all();
+  const promises = nodes.map(async (node) => {
+    try {
+      const response = await syncNodeToDaemon(node.id, 'FETCH_STATS');
+      if (response && response.status === 'ok') {
+        const multiplier = node.multiplier !== undefined ? node.multiplier : 1.0;
+        processNodeTraffic(node.id, multiplier, response.user_traffic, response.system_stats);
+        db.prepare('UPDATE node_sync_logs SET status = ?, message = ?, timestamp = ? WHERE node_id = ?')
+          .run('SYNC_OK', 'Polled stats successfully', Math.floor(Date.now() / 1000), node.id);
+      } else {
+        db.prepare('UPDATE node_sync_logs SET status = ?, message = ?, timestamp = ? WHERE node_id = ?')
+          .run('OFFLINE', 'Node is unreachable or auth failed', Math.floor(Date.now() / 1000), node.id);
+      }
+    } catch (e) {}
+  });
+  await Promise.allSettled(promises);
+}, POLLING_INTERVAL);
 
-// 定时检查用户过期状态（每 60 秒）
+
+// User Expiry Check Loop
 setInterval(() => {
   try {
     const now = new Date().toISOString().split('T')[0];
@@ -2077,44 +1897,33 @@ setInterval(() => {
       })();
       for (const u of expiredUsers) {
         pushUserEventToAllowedNodes(u.uuid, u.email, 'USER_DEL');
-        console.log(`[Expiry Check] User ${u.email} has expired. Access revoked.`);
       }
     }
-  } catch (err) {
-    console.error('[Expiry Check] Error:', err);
-  }
+  } catch (err) {}
 }, 60 * 1000);
 
-// ------------------------------------------------------------
 // Scheduled Restart Cron
-// ------------------------------------------------------------
 setInterval(() => {
   try {
     const now = new Date();
-    // Use local time for standard hour:minute comparison
     const currentHourStr = now.getHours().toString().padStart(2, '0');
     const currentMinStr = now.getMinutes().toString().padStart(2, '0');
     const timeStr = `${currentHourStr}:${currentMinStr}`;
 
     const nodes = db.prepare('SELECT id, advanced_config FROM nodes').all();
     for (const node of nodes) {
-      if (!activeNodes.has(node.id)) continue;
-
       let advConfig = {};
       if (node.advanced_config) {
         try { advConfig = JSON.parse(node.advanced_config); } catch {}
       }
-
       const restartTime = advConfig.restart_time || "04:00";
       if (timeStr === restartTime) {
-        console.log(`[Cron] Triggering daily RESTART_XRAY for node ${node.id} at ${timeStr}`);
-        const ws = activeNodes.get(node.id);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ event: 'RESTART_XRAY' }));
-        }
+         syncNodeToDaemon(node.id, 'RESTART_XRAY');
       }
     }
-  } catch (err) {
-    console.error('[Cron] Error checking scheduled restarts:', err);
-  }
+  } catch (err) {}
 }, 60 * 1000);
+
+server.listen(PORT, () => {
+  console.log(`VPS Clash Subscription Controller backend listening on port ${PORT} (HTTP Server Mode)`);
+});
