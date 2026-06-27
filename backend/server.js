@@ -528,13 +528,8 @@ app.get('/api/nodes/:id/logs', authenticate, requireAdmin, (req, res) => {
 app.post('/api/nodes/:id/update_daemon', authenticate, requireAdmin, (req, res) => {
   try {
     const nodeId = req.params.id;
-    const ws = activeNodes.get(nodeId);
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return res.status(400).json({ error: `节点 ${nodeId} 目前不在线，无法下发更新指令。` });
-    }
-    
-    // Push update command to daemon
-    ws.send(JSON.stringify({ event: 'UPDATE_DAEMON' }));
+    const fullUrl = req.protocol + '://' + req.get('host');
+    syncNodeToDaemon(nodeId, 'UPDATE_DAEMON', { download_url: fullUrl });
     
     // Log the action
     db.prepare(`
@@ -612,11 +607,7 @@ app.put('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
     })();
 
     // Disconnect old WebSocket to force daemon reconnect and reload config
-    const ws = activeNodes.get(oldId);
-    if (ws) {
-      ws.close(4000, '节点信息更改，强制重连');
-      activeNodes.delete(oldId);
-    }
+    triggerNodeConfigReload(newId);
 
     writeLog('UPDATE_NODE', newId, `修改了服务器节点 ${oldId} -> ${newId}，倍率 ${mult}`, req);
     res.json({ success: true, id: newId });
@@ -669,11 +660,7 @@ app.delete('/api/nodes/:id', authenticate, requireAdmin, (req, res) => {
     if (!existing) return res.status(404).json({ error: '节点不存在' });
 
     // Disconnect daemon
-    const ws = activeNodes.get(id);
-    if (ws) {
-      ws.close(4000, '节点已被删除');
-      activeNodes.delete(id);
-    }
+
 
     db.prepare('DELETE FROM nodes WHERE id = ?').run(id);
     writeLog('DELETE_NODE', id, `删除了服务器节点 ${id}`, req);
@@ -1280,13 +1267,15 @@ app.get('/api/audit/dashboard', authenticate, requireAdmin, (req, res) => {
     `).get();
     
     // 3. Online node counts & cluster network speed
-    const onlineNodesCount = activeNodes.size;
+    const onlineNodesCount = db.prepare('SELECT COUNT(*) as count FROM node_sync_logs WHERE status = ? AND timestamp > ?').get('SYNC_OK', Math.floor(Date.now() / 1000) - 120).count;
     const totalNodesCount = db.prepare('SELECT COUNT(*) as count FROM nodes').get().count;
     
     let totalRxSec = 0;
     let totalTxSec = 0;
-    for (const [nodeId, ws] of activeNodes.entries()) {
-      const stats = db.prepare('SELECT network_rx, network_tx FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(nodeId);
+    const onlineNodes = db.prepare('SELECT node_id FROM node_sync_logs WHERE status = ? AND timestamp > ?').all('SYNC_OK', Math.floor(Date.now() / 1000) - 120);
+    
+    for (const node of onlineNodes) {
+      const stats = db.prepare('SELECT network_rx, network_tx FROM node_stats WHERE node_id = ? ORDER BY timestamp DESC LIMIT 1').get(node.node_id);
       if (stats) {
         totalRxSec += stats.network_rx;
         totalTxSec += stats.network_tx;
